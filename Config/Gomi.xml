@@ -1,0 +1,351 @@
+<?xml version="1.0"?>
+<!-- Gomi.xml
+
+     Velocity Analytics Engine plugin configuration file.
+
+     Notice:
+       * All XML elements must have a closing tag.
+       * XML tags are case sensitive.
+       * XML elements must be properly nested.
+       * XML attribute values must be quoted.
+       * Comments may appear anywhere in a document outside other markup.
+       * The string (double-hyphen) must not occur within comments.
+
+
+  -->
+<PluginFrameworkModule id="Gomi">
+
+<!-- Absolute path of plugin library -->
+	<Lib id="GomiLib" path="C:/Vhayu/Engine/Bin64/Gomi.dll"/>
+
+<!-- Velocity boiler plate -->
+	<UserPlugin id="GomiPlugin" type="GomiPlugin">
+
+<config>
+
+<!-- SNMP implant settings, uncomment node to enable.  Subagent in Net-SNMP terminology
+     means that this implant will connect to a separate running agent, i.e. snmpd.exe.
+
+     Optional filelog attribute for a somewhat insubstancial Net-SNMP output, e.g.
+
+	<Snmp filelog="/snmp.log">
+        ...
+        </Snmp>
+
+     NB:  Net-SNMP subagents are incompatible with Microsoft's SNMP daemon.
+
+     NB:  TREP-VA by default configures snmpd to listen to tcp:<hostname>:705 instead of
+          tcp:localhost:705 for subagent connectivity.
+
+  -->
+<!--	<Snmp>
+		<agentX subagent="true"
+			socket="tcp:localhost:705"/>
+	</Snmp> -->
+
+<!-- RFA settings
+
+     Override settings in this file with the Windows registry by setting the key name
+     as a parameter, e.g.
+
+	<Rfa key="HKLM/SOFTWARE/Reuters/RFA/Gomi">
+
+     NB:  RFA will raise an exception and the plugin will terminate if at least one value
+     is not defined underneath the key.
+
+  -->
+	<Rfa>
+
+<!-- TREP-RT service name this plugin provides, compare to IDN_RDF or IDN_SELECTFEED. -->
+		<service name="NI_VTA"/>
+
+<!-- One or more servers may be listed.  This plugin is a non-interactive provider and uses
+     port 14003 by default compared with interactive providers that usually use port 14002.
+     As a non-interactive provider the TCP connection will be initiated by the plugin and not
+     the ADH, configure firewalls appropriately.
+
+  -->
+		<session name="SESSIONA">
+			<publisher name="PUBLISHERA"/>		<!-- Name used for logging. -->
+			<connection name="CONNECTIONA" defaultPort="14003">
+				<server>adh1.local</server>
+			</connection>
+<!-- DACS required parameters. -->
+			<login applicationId="256"
+				instanceId="Instance1"
+				userName="user1"/>
+		</session>
+
+		<session name="SESSIONB">
+			<publisher name="PUBLISHERB"/>
+			<connection name="CONNECTIONB">
+				<server>adh2.local:14003</server>
+			</connection>
+			<login applicationId="256"
+				instanceId="Instance1"
+				userName="user1"/>
+		</session>
+
+<!-- Clutter -->
+		<monitor name="ApplicationLoggerMonitorName"/>
+		<eventQueue name="EventQueueName"/>
+		<vendor name="Thomson Reuters"/>
+	</Rfa>
+
+<!-- Equity bin definitions
+
+
+  -->
+	<Gomi
+		interval="600"
+		symbolmap="C:/Vhayu/Config/symbolmap.txt"
+		suffix="VTA"
+		TZDB="C:/Vhayu/Config/date_time_zonespec.csv"
+		TZ=”America/New_York”
+		dayCount="20">
+
+		<fields>
+			<archive>
+				<fid name="TIMACT">5</fid>
+				<fid name="ACTIV_DATE">17</fid>
+				<fid name="AVGVOL_20D">-100</fid>
+				<fid name="COUNT_20D">-101</fid>
+				<fid name="HICNT_20D">-102</fid>
+				<fid name="LOCNT_20D">-103</fid>
+				<fid name="PCTCHG_10D">3726</fid>
+				<fid name="PCTCHG_15D">-104</fid>
+				<fid name="PCTCHG_20D">-105</fid>
+			</archive>
+			<realtime>
+				<bin name="OPEN">
+					<fid name="OPBIN_20D_AVGVOL">-1</fid>
+					<fid name="OPBIN_20D_COUNT">-2</fid>
+					<fid name="OPBIN_20D_HICNT">-3</fid>
+					<fid name="OPBIN_20D_LOCNT">-4</fid>
+					<fid name="OPBIN_10D_PC">-5</fid>
+					<fid name="OPBIN_15D_PC">-6</fid>
+					<fid name="OPBIN_20D_PC">-7</fid>
+				</bin>
+				<bin name="CLOSE">
+					<fid name="CLBIN_20D_AVGVOL">-15</fid>
+					<fid name="CLBIN_20D_COUNT">-16</fid>
+					<fid name="CLBIN_20D_HICNT">-17</fid>
+					<fid name="CLBIN_20D_LOCNT">-18</fid>
+					<fid name="CLBIN_10D_PC">-19</fid>
+					<fid name="CLBIN_15D_PC">-20</fid>
+					<fid name="CLBIN_20D_PC">-21</fid>
+				</bin>
+				<bin name="FIRST">
+					<fid name="1STBIN_20D_AVGVOL">-29</fid>
+					<fid name="1STBIN_20D_COUNT">-30</fid>
+					<fid name="1STBIN_20D_HICNT">-31</fid>
+					<fid name="1STBIN_20D_LOCNT">-32</fid>
+					<fid name="1STBIN_10D_PC">-33</fid>
+					<fid name="1STBIN_15D_PC">-34</fid>
+					<fid name="1STBIN_20D_PC">-35</fid>
+				</bin>
+				<bin name="LAST">
+					<fid name="LSTBIN_20D_AVGVOL">-36</fid>
+					<fid name="LSTBIN_20D_COUNT">-37</fid>
+					<fid name="LSTBIN_20D_HICNT">-38</fid>
+					<fid name="LSTBIN_20D_LOCNT">-39</fid>
+					<fid name="LSTBIN_10D_PC">-40</fid>
+					<fid name="LSTBIN_15D_PC">-41</fid>
+					<fid name="LSTBIN_20D_PC">-42</fid>
+				</bin>
+				<bin name="10MIN">
+					<fid name="10MNBIN_20D_AVGVOL">-43</fid>
+					<fid name="10MNBIN_20D_COUNT">-44</fid>
+					<fid name="10MNBIN_20D_HICNT">-45</fid>
+					<fid name="10MNBIN_20D_LOCNT">-46</fid>
+					<fid name="10MNBIN_10D_PC">-47</fid>
+					<fid name="10MNBIN_15D_PC">-48</fid>
+					<fid name="10MNBIN_20D_PC">-49</fid>
+				</bin>
+			</realtime>
+		</fields>
+
+		<bins>
+			<bin name="OPEN">
+				<time>9:25</time>
+				<time>9:30</time>
+			</bin>
+			<bin name="CLOSE">
+				<time>16:00</time>
+				<time>16:05</time>
+			</bin>
+			<bin name="FIRST">
+				<time>9:30</time>
+				<time>10:30</time>
+			</bin>
+			<bin name="LAST">
+				<time>15:00</time>
+				<time>16:00</time>
+			</bin>
+
+<!-- 10 minute bins -->
+	                <bin name="0940">
+	                        <time>9:30</time>
+	                        <time>9:40</time>
+	                </bin>
+	                <bin name="0950">
+	                        <time>9:40</time>
+	                        <time>9:50</time>
+	                </bin>
+	                <bin name="1000">
+	                        <time>9:50</time>
+	                        <time>10:00</time>
+	                </bin>
+	                <bin name="1010">
+	                        <time>10:00</time>
+	                        <time>10:10</time>
+	                </bin>
+	                <bin name="1020">
+	                        <time>10:10</time>
+	                        <time>10:20</time>
+	                </bin>
+			<bin name="1030">
+	                        <time>10:20</time>
+	                        <time>10:30</time>
+	        	        </bin>
+	                <bin name="1040">
+	                        <time>10:30</time>
+	                        <time>10:40</time>
+	                </bin>
+	                <bin name="1050">
+	                        <time>10:40</time>
+	                        <time>10:50</time>
+	                </bin>
+	                <bin name="1100">
+	                        <time>10:50</time>
+	                        <time>11:00</time>
+	                </bin>
+	                <bin name="1110">
+	                        <time>11:00</time>
+	                        <time>11:10</time>
+	                </bin>
+	                <bin name="1120">
+	                        <time>11:10</time>
+	                        <time>11:20</time>
+	                </bin>
+	                <bin name="1130">
+	                        <time>11:20</time>
+	                        <time>11:30</time>
+	                </bin>
+	                <bin name="1140">
+	                        <time>11:30</time>
+	                        <time>11:40</time>
+	                </bin>
+	                <bin name="1150">
+	                        <time>11:40</time>
+	                        <time>11:50</time>
+	                </bin>
+	                <bin name="1200">
+	                        <time>11:50</time>
+	                        <time>12:00</time>
+	                </bin>
+	                <bin name="1210">
+	                        <time>12:00</time>
+	                        <time>12:10</time>
+	                </bin>
+	                <bin name="1220">
+				<time>12:10</time>
+	                        <time>12:20</time>
+	                </bin>
+	                <bin name="1230">
+	                        <time>12:20</time>
+	                        <time>12:30</time>
+	                </bin>
+        	        <bin name="1240">
+	                        <time>12:30</time>
+	                        <time>12:40</time>
+	                </bin>
+	                <bin name="1250">
+	                        <time>12:40</time>
+	                        <time>12:50</time>
+	                </bin>
+	                <bin name="1300">
+	                        <time>12:50</time>
+	                        <time>13:00</time>
+	                </bin>
+	                <bin name="1310">
+	                        <time>13:00</time>
+	                        <time>13:10</time>
+	                </bin>
+	                <bin name="1320">
+	                        <time>13:10</time>
+	                        <time>13:20</time>
+	                </bin>
+	                <bin name="1330">
+	                        <time>13:20</time>
+	                        <time>13:30</time>
+	                </bin>
+	                <bin name="1340">
+	                        <time>13:30</time>
+	                        <time>13:40</time>
+	                </bin>
+	                <bin name="1350">
+	                        <time>13:40</time>
+	                        <time>13:50</time>
+	                </bin>
+	                <bin name="1400">
+	                        <time>13:50</time>
+	                        <time>14:00</time>
+	                </bin>
+	                <bin name="1410">
+	                        <time>14:00</time>
+	                        <time>14:10</time>
+	                </bin>
+	                <bin name="1420">
+	                        <time>14:10</time>
+	                        <time>14:20</time>
+	                </bin>
+	                <bin name="1430">
+	                        <time>14:20</time>
+	                        <time>14:30</time>
+	                </bin>
+	                <bin name="1440">
+	                        <time>14:30</time>
+	                        <time>14:40</time>
+	                </bin>
+	                <bin name="1450">
+	                        <time>14:40</time>
+	                        <time>14:50</time>
+	                </bin>
+	                <bin name="1500">
+	                        <time>14:50</time>
+	                        <time>15:00</time>
+	                </bin>
+	                <bin name="1510">
+	                        <time>15:00</time>
+	                        <time>15:10</time>
+	                </bin>
+	                <bin name="1520">
+	                        <time>15:10</time>
+	                        <time>15:20</time>
+	                </bin>
+	                <bin name="1530">
+	                        <time>15:20</time>
+	                        <time>15:30</time>
+	                </bin>
+	                <bin name="1540">
+	                        <time>15:30</time>
+	                        <time>15:40</time>
+	                </bin>
+	                <bin name="1550">
+	                        <time>15:40</time>
+	                        <time>15:50</time>
+	                </bin>
+	                <bin name="1600">
+	                        <time>15:50</time>
+	                        <time>16:00</time>
+	                </bin>
+			
+		</bins>
+	</Gomi>
+
+</config>
+
+	</UserPlugin>
+
+</PluginFrameworkModule>
