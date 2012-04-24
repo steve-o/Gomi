@@ -141,6 +141,8 @@ set(cxx-sources
 	src/chromium/command_line.cc
 	src/chromium/debug/stack_trace.cc
 	src/chromium/debug/stack_trace_win.cc
+	src/chromium/file_util.cc
+	src/chromium/file_util_win.cc
 	src/chromium/memory/singleton.cc
 	src/chromium/logging.cc
 	src/chromium/string_piece.cc

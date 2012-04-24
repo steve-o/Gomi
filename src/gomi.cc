@@ -11,7 +11,9 @@
 /* Boost Posix Time */
 #include "boost/date_time/gregorian/gregorian_types.hpp"
 
+#include "chromium/file_util.hh"
 #include "chromium/logging.hh"
+#include "chromium/string_split.hh"
 #include "get_bin.hh"
 #include "snmp_agent.hh"
 #include "error.hh"
@@ -107,6 +109,23 @@ on_timer (
 	gomi->processTimer (nullptr);
 }
 
+/* read entire symbolmap file into memory and spit into contiguous blocks of
+ * non-whitespace characters.
+ */
+static
+bool
+ReadSymbolMap (
+	const std::string& symbolmap_file,
+	std::vector<std::string>* symbolmap
+	)
+{
+	std::string contents;
+	if (!file_util::ReadFileToString (symbolmap_file, &contents))
+		return false;
+	chromium::SplitStringAlongWhitespace (contents, symbolmap);
+	return true;
+}
+
 gomi::gomi_t::gomi_t() :
 	is_shutdown_ (false),
 	day_count_ (0),
@@ -145,7 +164,7 @@ gomi::gomi_t::init (
 	const vpf::UserPluginConfig& vpf_config
 	)
 {
-/* Thunk to VA user-plugin base class. */
+	/* Thunk to VA user-plugin base class. */
 	vpf::AbstractUserPlugin::init (vpf_config);
 
 /* Save copies of provided identifiers. */
@@ -156,6 +175,8 @@ gomi::gomi_t::init (
 		", instance: " << instance_ <<
 		", version: \"0.0.1\""
 		" }";
+
+	std::vector<std::string> symbolmap;
 
 	if (!config_.parseDomElement (vpf_config.getXmlConfigData()))
 		goto cleanup;
@@ -170,6 +191,12 @@ gomi::gomi_t::init (
 		goto cleanup;
 	} catch (boost::local_time::bad_field_count& e) {
 		LOG(ERROR) << "Time zone specifications malformed: " << e.what();
+		goto cleanup;
+	}
+
+/* "Symbol map" a.k.a. list of Reuters Instrument Codes (RICs). */
+	if (!ReadSymbolMap (config_.symbolmap, &symbolmap)) {
+		LOG(ERROR) << "Cannot read symbolmap file: " << config_.symbolmap;
 		goto cleanup;
 	}
 
@@ -195,6 +222,11 @@ gomi::gomi_t::init (
 		provider_.reset (new provider_t (config_, rfa_, event_queue_));
 		if (!(bool)provider_ || !provider_->init())
 			goto cleanup;
+
+for (auto it = symbolmap.begin();
+	it != symbolmap.end();
+	++it)
+	LOG(INFO) << "symbol: " << *it;
 
 /* Create state for published instruments. */
 		for (auto it = config_.bins.begin();
@@ -664,7 +696,7 @@ gomi::gomi_t::tclFeedLogQuery (
 
 /* timezone for time calculations */
 	len = 0;
-	const std::string region (Tcl_GetStringFromObj (objv[1], &len));
+	const std::string region (Tcl_GetStringFromObj (objv[2], &len));
 	if (0 == len) {
 		Tcl_SetResult (interp, "TZ cannot be empty", TCL_STATIC);
 		return TCL_ERROR;
@@ -680,7 +712,7 @@ gomi::gomi_t::tclFeedLogQuery (
 
 /* count of days for bin analytic */
 	long day_count = 0;
-	Tcl_GetLongFromObj (interp, objv[3], &day_count);
+	Tcl_GetLongFromObj (interp, objv[4], &day_count);
 	if (0 == day_count) {
 		Tcl_SetResult (interp, "dayCount must be greater than zero", TCL_STATIC);
 		return TCL_ERROR;
@@ -689,11 +721,11 @@ gomi::gomi_t::tclFeedLogQuery (
 	DLOG(INFO) << "dayCount=" << day_count;
 
 /* startTime, not converted by "clock scan" as we require time-of-day only */
-	const std::string start_time_str (Tcl_GetStringFromObj (objv[4], &len));
+	const std::string start_time_str (Tcl_GetStringFromObj (objv[5], &len));
 	boost::posix_time::time_duration start_time (boost::posix_time::duration_from_string (start_time_str));
 
 /* endTime */
-	const std::string end_time_str (Tcl_GetStringFromObj (objv[5], &len));
+	const std::string end_time_str (Tcl_GetStringFromObj (objv[6], &len));
 	boost::posix_time::time_duration end_time (boost::posix_time::duration_from_string (end_time_str));
 
 /* Time must be ascending. */
@@ -707,7 +739,7 @@ gomi::gomi_t::tclFeedLogQuery (
 /* symbolList must be a list object.
  * NB: VA 7.0 does not export Tcl_ListObjGetElements()
  */
-	int listLen, result = Tcl_ListObjLength (interp, objv[2], &listLen);
+	int listLen, result = Tcl_ListObjLength (interp, objv[3], &listLen);
 	if (TCL_OK != result)
 		return result;
 	if (0 == listLen) {
@@ -722,7 +754,7 @@ gomi::gomi_t::tclFeedLogQuery (
 	for (int i = 0; i < listLen; i++)
 	{
 		Tcl_Obj* objPtr = nullptr;
-		Tcl_ListObjIndex (interp, objv[2], i, &objPtr);
+		Tcl_ListObjIndex (interp, objv[3], i, &objPtr);
 
 		int len = 0;
 		char* symbol_text = Tcl_GetStringFromObj (objPtr, &len);

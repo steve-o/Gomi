@@ -18,9 +18,16 @@ namespace ms
 
 		static void close (PTP_TIMER value) throw()
 		{
-#if _WIN32_WINNT >= _WIN32_WINNT_WS08
+/* In some cases, callback functions might run after CloseThreadpoolTimer has been called. To prevent this behavior:
+ * 1. Call the SetThreadpoolTimer function with the pftDueTime parameter set to NULL and the msPeriod and msWindowLength parameters set to 0.
+ */
+			SetThreadpoolTimer (value, NULL, 0, 0);
+/* 2. Call the WaitForThreadpoolTimerCallbacks function.
+ */
+			WaitForThreadpoolTimerCallbacks (value, true);
+/* 3. Call CloseThreadpoolTimer.
+ */
 			CloseThreadpoolTimer (value);
-#endif
 		}
 	};
 
