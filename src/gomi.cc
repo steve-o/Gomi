@@ -244,6 +244,10 @@ gomi::gomi_t::init (
 
 /* default time zone */
 	TZ_ = tzdb_.time_zone_from_region (config_.tz);
+	if (nullptr == TZ_) {
+		LOG(ERROR) << "TZ not listed within configured time zone specifications.";
+		goto cleanup;
+	}
 
 /* /bin/ declarations */
 	unsigned day_count = std::stoi (config_.day_count);
