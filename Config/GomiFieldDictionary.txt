@@ -1,0 +1,119 @@
+!ACRONYM    DDE ACRONYM          FID  RIPPLES TO  FIELD TYPE     LENGTH  RWF TYPE   RWF LEN
+!-------    -----------          ---  ----------  ----------     ------  --------   -------
+!
+VMA_20D    "VOL MOV AVG 20D"     -100  NULL        INTEGER            15  REAL64           7
+!
+! 20 days moving average volume.
+!
+VMA_20TD   "VOL MOV AVG 20TD"    -101  NULL        INTEGER            15  REAL64           7
+!
+! 20 trading-days moving average volume.  A trading day define as a day without a trading halt.
+!
+TRDCNT_20D "NUMBER TRADES 20D"   -102  NULL        INTEGER            15  REAL64           7
+!
+! 20 days moving average trade count.
+!
+HICNT_20D  "20D HIGH TRD CNT"    -103  NULL        INTEGER            15  REAL64           7
+!
+! Highest single day trade count for last 20 days.
+!
+LOCNT_20D  "20D LOW TRD CNT"     -104  NULL        INTEGER            15  REAL64           7
+!
+! Lowest single day trade count for last 20 days.
+!
+SMCNT_20D  "20D SMALL TRD CNT"   -105  NULL        INTEGER            15  REAL64           7
+!
+! Smallest single day trade count for last 20 days.
+!
+PCTCHG_15D "PRICE PCTCHG 15D"    -106  NULL        PRICE              17  REAL64           7
+!
+! Trade Price percentage change calculation against 15th previous day.
+!
+PCTCHG_20D "PRICE PCTCHG 20D"    -107  NULL        PRICE              17  REAL64           7
+!
+! Trade Price percentage change calculation against 20th previous day.
+!
+OPN_B_MA20 "OPEN BIN 20D MA"     -108 NULL         INTEGER            15  REAL64           7
+OP2_B_MA20 "O/PRE BIN 20D MA"    -109 NULL         INTEGER            15  REAL64           7
+CLS_B_MA20 "CLOSE BIN 20D MA"    -110 NULL         INTEGER            15  REAL64           7
+CL2_B_MA20 "C/POST BIN 20D MA"   -111 NULL         INTEGER            15  REAL64           7
+1ST_B_MA20 "1ST HOUR BIN 20D MA" -112 NULL         INTEGER            15  REAL64           7
+LST_B_MA20 "LST HOUR BIN 20D MA" -113 NULL         INTEGER            15  REAL64           7
+10M_B_MA20 "LST 10MN BIN 20D MA" -114 NULL         INTEGER            15  REAL64           7
+!
+! 20 day bin moving average volume.
+!
+OPN_B_MT20 "OPEN BIN 20TD MA"    -115 NULL         INTEGER            15  REAL64           7
+OP2_B_MT20 "O/PRE BIN 20TD MA"   -116 NULL         INTEGER            15  REAL64           7
+CLS_B_MT20 "CLOSE BIN 20TD MA"   -117 NULL         INTEGER            15  REAL64           7
+CL2_B_MT20 "C/POST BIN 20TD MA"  -118 NULL         INTEGER            15  REAL64           7
+1ST_B_MT20 "1ST HR BIN 20TD MA"  -119 NULL         INTEGER            15  REAL64           7
+LST_B_MT20 "LST HR BIN 20TD MA"  -120 NULL         INTEGER            15  REAL64           7
+10M_B_MT20 "LST 10M BIN 20TD MA" -121 NULL         INTEGER            15  REAL64           7
+!
+! 20 trading-day bin moving average volume.
+!
+OPN_B_NM20 "OPEN BIN 20D NM"     -122 NULL         INTEGER            15  REAL64           7
+OP2_B_NM20 "O/PRE BIN 20D NM"    -123 NULL         INTEGER            15  REAL64           7
+CLS_B_NM20 "CLOSE BIN 20D NM"    -124 NULL         INTEGER            15  REAL64           7
+CL2_B_NM20 "C/POST BIN 20D NM"   -125 NULL         INTEGER            15  REAL64           7
+1ST_B_NM20 "1ST HOUR BIN 20D NM" -126 NULL         INTEGER            15  REAL64           7
+LST_B_NM20 "LST HOUR BIN 20D NM" -127 NULL         INTEGER            15  REAL64           7
+10M_B_NM20 "LST 10MN BIN 20D NM" -128 NULL         INTEGER            15  REAL64           7
+!
+! 20 day bin moving average trade count.
+!
+OPN_B_HI20 "OPEN BIN 20D HI NM"  -129 NULL         INTEGER            15  REAL64           7
+OP2_B_HI20 "O/PRE BIN 20D HI NM" -130 NULL         INTEGER            15  REAL64           7
+CLS_B_HI20 "CLOSE BIN 20D HI NM" -131 NULL         INTEGER            15  REAL64           7
+CL2_B_HI20 "C/POST BN 20D HI NM" -132 NULL         INTEGER            15  REAL64           7
+1ST_B_HI20 "1STHR BIN 20D HI NM" -133 NULL         INTEGER            15  REAL64           7
+LST_B_HI20 "LSTHR BIN 20D HI NM" -134 NULL         INTEGER            15  REAL64           7
+10M_B_HI20 "LST10M BN 20D HI NM" -135 NULL         INTEGER            15  REAL64           7
+!
+! 20 day bin highest single day trade count.
+!
+OPN_B_LO20 "OPEN BIN 20D LO NM"  -136 NULL         INTEGER            15  REAL64           7
+OP2_B_LO20 "O/PRE BIN 20D LO NM" -137 NULL         INTEGER            15  REAL64           7
+CLS_B_LO20 "CLOSE BIN 20D LO NM" -138 NULL         INTEGER            15  REAL64           7
+CL2_B_LO20 "C/POST BN 20D LO NM" -139 NULL         INTEGER            15  REAL64           7
+1ST_B_LO20 "1STHR BIN 20D LO NM" -140 NULL         INTEGER            15  REAL64           7
+LST_B_LO20 "LSTHR BIN 20D LO NM" -141 NULL         INTEGER            15  REAL64           7
+10M_B_LO20 "LST10M BN 20D LO NM" -142 NULL         INTEGER            15  REAL64           7
+!
+! 20 day bin lowest single day trade count.
+!
+OPN_B_SM20 "OPEN BIN 20D SM NM"  -143 NULL         INTEGER            15  REAL64           7
+OP2_B_SM20 "O/PRE BIN 20D SM NM" -144 NULL         INTEGER            15  REAL64           7
+CLS_B_SM20 "CLOSE BIN 20D SM NM" -145 NULL         INTEGER            15  REAL64           7
+CL2_B_SM20 "C/POST BN 20D SM NM" -146 NULL         INTEGER            15  REAL64           7
+1ST_B_SM20 "1STHR BIN 20D SM NM" -147 NULL         INTEGER            15  REAL64           7
+LST_B_SM20 "LSTHR BIN 20D SM NM" -148 NULL         INTEGER            15  REAL64           7
+10M_B_SM20 "LST10M BN 20D SM NM" -149 NULL         INTEGER            15  REAL64           7
+!
+! 20 day bin smallest single day trade count.
+!
+OPN_B_PC10 "OPEN BIN 10D PCTCHG" -150 NULL         PRICE              17  REAL64           7
+OPN_B_PC15 "OPEN BIN 15D PCTCHG" -151 NULL         PRICE              17  REAL64           7
+OPN_B_PC20 "OPEN BIN 20D PCTCHG" -152 NULL         PRICE              17  REAL64           7
+OP2_B_PC10 "O/PRE BN 10D PCTCHG" -153 NULL         PRICE              17  REAL64           7
+OP2_B_PC15 "O/PRE BN 15D PCTCHG" -154 NULL         PRICE              17  REAL64           7
+OP2_B_PC20 "O/PRE BN 20D PCTCHG" -155 NULL         PRICE              17  REAL64           7
+CLS_B_PC10 "CLOSE BN 10D PCTCHG" -156 NULL         PRICE              17  REAL64           7
+CLS_B_PC15 "CLOSE BN 15D PCTCHG" -157 NULL         PRICE              17  REAL64           7
+CLS_B_PC20 "CLOSE BN 20D PCTCHG" -158 NULL         PRICE              17  REAL64           7
+CL2_B_PC10 "C/POST BIN 10D PC"   -159 NULL         PRICE              17  REAL64           7
+CL2_B_PC15 "C/POST BIN 15D PC"   -160 NULL         PRICE              17  REAL64           7
+CL2_B_PC20 "C/POST BIN 20D PC"   -161 NULL         PRICE              17  REAL64           7
+1ST_B_PC10 "1ST HOUR BIN 10D PC" -162 NULL         PRICE              17  REAL64           7
+1ST_B_PC15 "1ST HOUR BIN 15D PC" -163 NULL         PRICE              17  REAL64           7
+1ST_B_PC20 "1ST HOUR BIN 20D PC" -164 NULL         PRICE              17  REAL64           7
+LST_B_PC10 "LST HOUR BIN 10D PC" -165 NULL         PRICE              17  REAL64           7
+LST_B_PC15 "LST HOUR BIN 15D PC" -166 NULL         PRICE              17  REAL64           7
+LST_B_PC20 "LST HOUR BIN 20D PC" -167 NULL         PRICE              17  REAL64           7
+10M_B_PC10 "LST 10MN BIN 10D PC" -168 NULL         PRICE              17  REAL64           7
+10M_B_PC15 "LST 10MN BIN 15D PC" -169 NULL         PRICE              17  REAL64           7
+10M_B_PC20 "LST 10MN BIN 20D PC" -170 NULL         PRICE              17  REAL64           7
+!
+! Trade Price percentage change for various time period bins.
+!

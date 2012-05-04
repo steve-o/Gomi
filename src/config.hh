@@ -59,6 +59,28 @@ namespace gomi
 		std::string position;
 	};
 
+	struct fidset_t
+	{
+/* VMA_20D: Volume moving average. */
+		int	RdmAverageVolumeId;
+/* VMA_20TD: Volume moving average for non-zero trading days, i.e. no halts. */
+		int	RdmAverageNonZeroVolumeId;
+/* TRDCNT_20D: Trade count */
+		int	RdmTotalMovesId;
+/* HICNT_20D: Highest days trade count */
+		int	RdmMaximumMovesId;
+/* LOCNT_20D: Lowest days trade count */
+		int	RdmMinimumMovesId;
+/* SMCNT_20D: Smallest days trade count */
+		int	RdmSmallestMovesId;
+/* PCTCHG_10D: 10-day percentage change in price */
+		int	Rdm10DayPercentChangeId;
+/* PCTCHG_15D: 15-day percentage change in price */
+		int	Rdm15DayPercentChangeId;
+/* PCTCHG_20D: 20-day percentage change in price */
+		int	Rdm20DayPercentChangeId;
+	};
+
 	struct config_t
 	{
 		config_t();
@@ -82,7 +104,7 @@ namespace gomi
 		bool parseArchiveNode (const xercesc::DOMNode* node);
 		bool parseRealtimeNode (const xercesc::DOMNode* node);
 		bool parseRealtimeBinNode (const xercesc::DOMNode* node);
-		bool parseFidNode (const xercesc::DOMNode* node, std::string& fid);
+		bool parseFidNode (const xercesc::DOMNode* node, fidset_t& fidset);
 		bool parseBinsNode (const xercesc::DOMNode* node);
 		bool parseBinNode (const xercesc::DOMNode* node, std::string& bin);
 		bool parseTimeNode (const xercesc::DOMNode* node, std::string& time);
@@ -146,8 +168,8 @@ namespace gomi
 		std::string day_count;
 
 //  FIDs for archival and realtime records.
-		std::vector<std::string> archive_fids,
-			realtime_fids;
+		fidset_t archive_fids;
+		std::map<std::string, fidset_t> realtime_fids;
 
 //  Bin definitions.
 		std::vector<std::string> bins;
@@ -174,6 +196,22 @@ namespace gomi
 			", instance_id: \"" << session.instance_id << "\""
 			", user_name: \"" << session.user_name << "\""
 			", position: \"" << session.position << "\""
+			" }";
+		return o;
+	}
+
+	inline
+	std::ostream& operator<< (std::ostream& o, const fidset_t& fidset) {
+		o << "{ "
+			  "VMA: " << fidset.RdmAverageVolumeId <<
+			", NZERO_VMA: " <<  fidset.RdmAverageNonZeroVolumeId <<
+			", NUM_MOVES: " << fidset.RdmTotalMovesId <<
+			", NM_HIGH: " << fidset.RdmMaximumMovesId <<
+			", NM_LOW: " << fidset.RdmMinimumMovesId <<
+			", NM_SMALL: " << fidset.RdmSmallestMovesId <<
+			", PCTCHG_10D: " << fidset.Rdm10DayPercentChangeId <<
+			", PCTCHG_15D: " << fidset.Rdm15DayPercentChangeId <<
+			", PCTCHG_20D: " << fidset.Rdm20DayPercentChangeId <<
 			" }";
 		return o;
 	}
@@ -206,25 +244,17 @@ namespace gomi
 			", tz: \"" << config.tz << "\""
 			", tzdb: \"" << config.tzdb << "\""
 			", day_count: \"" << config.day_count << "\""
-			", archive_fids: [ ";
-		for (auto it = config.archive_fids.begin();
-			it != config.archive_fids.end();
-			++it)
-		{
-			if (it != config.archive_fids.begin())
-				o << ", ";
-			o << '"' << *it << '"';
-		}
-		o << " ], realtime_fids: [ ";
+			", archive_fids: " << config.archive_fids <<
+			", realtime_fids: { ";
 		for (auto it = config.realtime_fids.begin();
 			it != config.realtime_fids.end();
 			++it)
 		{
 			if (it != config.realtime_fids.begin())
 				o << ", ";
-			o << '"' << *it << '"';
+			o << it->first << ": " << it->second;
 		}
-		o << " ], bins: [ ";
+		o << " }, bins: [ ";
 		for (auto it = config.bins.begin();
 			it != config.bins.end();
 			++it)

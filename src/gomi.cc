@@ -35,15 +35,6 @@ static const unsigned kSymbolListLimit = 150;
 /* RDM FIDs. */
 static const int kRdmTimeOfUpdateId		= 5;
 static const int kRdmActiveDateId		= 17;
-static const int kRdm10DayPercentChangeId	= 3726;
-static const int kRdm15DayPercentChangeId	= -104;
-static const int kRdm20DayPercentChangeId	= -105;
-static const int kRdmAverageVolumeId		= -100;
-static const int kRdmAverageNonZeroVolumeId	= -104;
-static const int kRdmTotalMovesId		= -101;
-static const int kRdmMaximumMovesId		= -102;
-static const int kRdmMinimumMovesId		= -103;
-static const int kRdmSmallestMovesId		= -105;
 
 /* FlexRecord Quote identifier. */
 static const uint32_t kQuoteId = 40002;
@@ -59,6 +50,9 @@ static const char* kRepublishFunctionName = "gomi_republish";
 /* Default FlexRecord fields. */
 static const char* kDefaultLastPriceField = "LastPrice";
 static const char* kDefaultTickVolumeField = "TickVolume";
+
+/* Special last 10-minute bin name */
+static const char* kLast10MinuteBinName = "10MIN";
 
 /* http://en.wikipedia.org/wiki/Unix_epoch */
 static const boost::gregorian::date kUnixEpoch (1970, 1, 1);
@@ -109,8 +103,52 @@ on_timer (
 	gomi->processTimer (nullptr);
 }
 
+/* parse from /bin/ decls formatted as <name>=<start>-<end>, e.g. "OPEN=09:00-09:33"
+ */
+static
+bool
+ParseBinDecl (
+	const std::string& str,
+	boost::local_time::time_zone_ptr tz,
+	unsigned day_count,
+	gomi::bin_t* bin
+	)
+{
+	DCHECK(nullptr != bin);
+	DLOG(INFO) << "bin decl: \"" << str << "\", tz: " << tz->std_zone_abbrev() << ", day_count: " << day_count;
+
+/* name */
+	std::string::size_type pos1 = str.find_first_of ("=");
+	if (std::string::npos == pos1)
+		return false;
+	bin->bin_name = str.substr (0, pos1);
+	VLOG(1) << "bin name: " << bin->bin_name;
+
+/* open time */
+	std::string::size_type pos2 = str.find_first_of ("-", pos1);
+	if (std::string::npos == pos2)
+		return false;
+	++pos1;
+	const std::string start (str.substr (pos1, pos2 - pos1));
+	VLOG(1) << "bin start: " << start;
+	bin->bin_start = boost::posix_time::duration_from_string (start);
+
+/* close time */
+	++pos2;
+	const std::string end (str.substr (pos2));
+	VLOG(1) << "bin start: " << end;
+	bin->bin_end = boost::posix_time::duration_from_string (end);
+
+/* time zone */
+	bin->bin_tz = tz;
+
+/* bin length */
+	bin->bin_day_count = day_count;
+	return true;
+}
+
 /* read entire symbolmap file into memory and spit into contiguous blocks of
- * non-whitespace characters.
+ * non-whitespace characters.  Zoom zoom.
  */
 static
 bool
@@ -128,7 +166,7 @@ ReadSymbolMap (
 
 gomi::gomi_t::gomi_t() :
 	is_shutdown_ (false),
-	day_count_ (0),
+	last_refresh_ (boost::posix_time::not_a_date_time),
 	last_activity_ (boost::posix_time::microsec_clock::universal_time()),
 	min_tcl_time_ (boost::posix_time::pos_infin),
 	max_tcl_time_ (boost::posix_time::neg_infin),
@@ -154,6 +192,16 @@ gomi::gomi_t::~gomi_t()
 	global_list_.remove (this);
 
 	clear();
+}
+
+/* is bin not a 10-minute time period, i.e. a realtime component.
+ */
+bool
+gomi::gomi_t::is_special_bin (const gomi::bin_t& bin)
+{
+	assert (!bin.bin_name.empty());
+	auto it = config_.realtime_fids.find (bin.bin_name);
+	return (it != config_.realtime_fids.end());
 }
 
 /* Plugin entry point from the Velocity Analytics Engine.
@@ -194,6 +242,21 @@ gomi::gomi_t::init (
 		goto cleanup;
 	}
 
+/* default time zone */
+	TZ_ = tzdb_.time_zone_from_region (config_.tz);
+
+/* /bin/ declarations */
+	unsigned day_count = std::stoi (config_.day_count);
+	for (auto it = config_.bins.begin(); it != config_.bins.end(); ++it)
+	{
+		bin_t bin;
+		if (!ParseBinDecl (*it, TZ_, day_count, &bin)) {
+			LOG(ERROR) << "Cannot parse bin delcs.";
+			goto cleanup;
+		}
+		bins_.insert (bin);
+	}
+
 /* "Symbol map" a.k.a. list of Reuters Instrument Codes (RICs). */
 	if (!ReadSymbolMap (config_.symbolmap, &symbolmap)) {
 		LOG(ERROR) << "Cannot read symbolmap file: " << config_.symbolmap;
@@ -223,30 +286,78 @@ gomi::gomi_t::init (
 		if (!(bool)provider_ || !provider_->init())
 			goto cleanup;
 
-for (auto it = symbolmap.begin();
-	it != symbolmap.end();
-	++it)
-	LOG(INFO) << "symbol: " << *it;
-
-/* Create state for published instruments. */
-		for (auto it = config_.bins.begin();
-			it != config_.bins.end();
+/* Create state for published instruments: For every instrument, e.g. MSFT.O
+ *	Realtime RIC: MSFT.O<suffix>
+ *	Archive RICs: MSFT.O.<bin><suffix>
+ */
+/* realtime set of multiple bins */
+		for (auto it = symbolmap.begin();
+			it != symbolmap.end();
 			++it)
 		{
-/* bin */
-			auto bin = std::make_shared<bin_t> (it->c_str(), kDefaultLastPriceField, kDefaultTickVolumeField);
-			assert ((bool)bin);
-			query_vector_.push_back (bin);
+			const auto& symbol = *it;
 
 /* analytic publish stream */
-			std::string symbol_name = bin->symbol_name + config_.suffix;
-			auto stream = std::make_shared<broadcast_stream_t> (bin);
+			std::ostringstream ss;
+			ss << symbol << config_.suffix;
+			auto stream = std::make_shared<realtime_stream_t> (symbol);
 			assert ((bool)stream);
-			if (!provider_->createItemStream (symbol_name.c_str(), stream))
+			if (!provider_->createItemStream (ss.str().c_str(), stream))
 				goto cleanup;
+			stream_vector_.push_back (stream);
 
-			stream_vector_.push_back (std::move (stream));
+/* last 10-minute bin fidset is constant */
+			stream->last_10min.first = config_.realtime_fids[kLast10MinuteBinName];
 		}
+
+/* archive bins */
+		for (auto it = bins_.begin();
+			it != bins_.end();
+			++it)
+		{
+/* create a symbolmap vector per bin */
+			std::pair<std::vector<std::shared_ptr<janku_t>>,
+				  std::vector<std::shared_ptr<archive_stream_t>>> v;
+
+			for (auto jt = stream_vector_.begin();
+				jt != stream_vector_.end();
+				++jt)
+			{
+				auto janku = std::make_shared<janku_t> ((*jt)->symbol_name.c_str(), kDefaultLastPriceField, kDefaultTickVolumeField);
+				assert ((bool)janku);
+
+				v.first.push_back (janku);
+
+/* analytic publish stream */
+				std::ostringstream ss;
+				ss << janku->symbol_name << '.' << it->bin_name	<< config_.suffix;
+				auto stream = std::make_shared<archive_stream_t> (janku);
+				assert ((bool)stream);
+				if (!provider_->createItemStream (ss.str().c_str(), stream))
+					goto cleanup;
+				v.second.push_back (stream);
+
+/* add reference to this archive to realtime stream */
+				if (is_special_bin (*it)) {
+					const auto& realtime_fids = config_.realtime_fids[it->bin_name];
+					(*jt)->special.emplace_back (std::make_pair (realtime_fids, stream));
+				} else {
+					(*jt)->last_10min.second.emplace (std::make_pair (*it, stream));
+				}
+			}
+
+			query_vector_.emplace (std::make_pair (*it, v));
+		}
+
+/* list bins */
+for (auto it = bins_.begin(); it != bins_.end(); ++it)
+	LOG(INFO) << "bin: " << it->bin_name;
+/* walk one archive stream */
+{
+	auto it = stream_vector_[0];
+	for (auto jt = it->special.begin(); jt != it->special.end(); ++jt)
+		LOG(INFO) << "special: " << jt->second->rfa_name;
+}
 
 /* Microsoft threadpool timer. */
 		timer_.reset (CreateThreadpoolTimer (static_cast<PTP_TIMER_CALLBACK>(on_timer), this /* closure */, nullptr /* env */));
@@ -296,11 +407,14 @@ for (auto it = symbolmap.begin();
 /* Timer for periodic publishing.
  */
 	FILETIME due_time;
-	get_next_interval (due_time);
+	if (!get_next_bin_close (TZ_, due_time)) {
+		LOG(ERROR) << "Cannot calculate next bin close time of day.";
+		goto cleanup;
+	}
 	const DWORD timer_period = std::stoul (config_.interval) * 1000;
 #if 1
-//	SetThreadpoolTimer (timer_.get(), &due_time, timer_period, 0);
-//	LOG(INFO) << "Added periodic timer, interval " << timer_period << "ms";
+	SetThreadpoolTimer (timer_.get(), &due_time, timer_period, 0);
+	LOG(INFO) << "Added periodic timer, interval " << timer_period << "ms";
 #else
 /* requires Platform SDK 7.1 */
 	typedef BOOL (WINAPI *SetWaitableTimerExProc)(
@@ -317,7 +431,7 @@ for (auto it = symbolmap.begin();
 	REASON_CONTEXT reasonContext = {0};
 	reasonContext.Version = 0;
 	reasonContext.Flags = POWER_REQUEST_CONTEXT_SIMPLE_STRING;
-	reasonContext.Reason.SimpleReasonString = L"HiloTimer";
+	reasonContext.Reason.SimpleReasonString = L"GomiTimer";
 	HMODULE hKernel32Module = GetModuleHandle (_T("kernel32.dll"));
 	BOOL timer_status = false;
 	if (nullptr != hKernel32Module)
@@ -362,7 +476,6 @@ gomi::gomi_t::clear()
 /* Release everything with an RFA dependency. */
 	thread_.reset();
 	event_pump_.reset();
-	stream_vector_.clear();
 	query_vector_.clear();
 	assert (provider_.use_count() <= 1);
 	provider_.reset();
@@ -488,13 +601,13 @@ gomi::gomi_t::tclGomiQuery (
 	int objc = cmdData.mObjc;			/* Number of arguments. */
 	Tcl_Obj** CONST objv = cmdData.mObjv;		/* Argument strings. */
 
-
-LOG(INFO) << "gomi_query";
-LOG(INFO) << "objc = " << objc;
 	if (objc != 6) {
 		Tcl_WrongNumArgs (interp, 1, objv, "TZ symbolList dayCount startTime endTime");
 		return TCL_ERROR;
 	}
+
+/* /bin/ declaration */
+	bin_t bin;
 
 /* timezone for time calculations */
 	int len = 0;
@@ -504,13 +617,13 @@ LOG(INFO) << "objc = " << objc;
 		return TCL_ERROR;
 	}
 
-	boost::local_time::time_zone_ptr TZ = tzdb_.time_zone_from_region (region);
-	if (nullptr == TZ) {
+	bin.bin_tz = tzdb_.time_zone_from_region (region);
+	if (nullptr == bin.bin_tz) {
 		Tcl_SetResult (interp, "TZ not listed within configured time zone specifications", TCL_STATIC);
 		return TCL_ERROR;
 	}
 
-	DLOG(INFO) << "TZ=" << region;
+	DVLOG(3) << "TZ=" << bin.bin_tz->std_zone_name();
 
 /* count of days for bin analytic */
 	long day_count;
@@ -520,23 +633,24 @@ LOG(INFO) << "objc = " << objc;
 		return TCL_ERROR;
 	}
 
-	DLOG(INFO) << "dayCount=" << day_count;
+	bin.bin_day_count = day_count;
+	DVLOG(3) << "dayCount=" << bin.bin_day_count;
 
 /* startTime, not converted by "clock scan" as we require time-of-day only */
 	const std::string start_time_str (Tcl_GetStringFromObj (objv[4], &len));
-	boost::posix_time::time_duration start_time (boost::posix_time::duration_from_string (start_time_str));
+	bin.bin_start = boost::posix_time::duration_from_string (start_time_str);
 
 /* endTime */
 	const std::string end_time_str (Tcl_GetStringFromObj (objv[5], &len));
-	boost::posix_time::time_duration end_time (boost::posix_time::duration_from_string (end_time_str));
+	bin.bin_end = boost::posix_time::duration_from_string (end_time_str);
 
 /* Time must be ascending. */
-	if (end_time <= start_time) {
+	if (bin.bin_end <= bin.bin_start) {
 		Tcl_SetResult (interp, "endTime must be after startTime", TCL_STATIC);
 		return TCL_ERROR;
 	}
 
-	DLOG(INFO) << "startTime=" << start_time << ", endTime=" << end_time;
+	DVLOG(3) << "startTime=" << bin.bin_start << ", endTime=" << bin.bin_end;
 
 /* symbolList must be a list object.
  * NB: VA 7.0 does not export Tcl_ListObjGetElements()
@@ -549,10 +663,10 @@ LOG(INFO) << "objc = " << objc;
 		return TCL_ERROR;
 	}
 
-	DLOG(INFO) << "symbolList with #" << listLen << " entries";
+	DVLOG(3) << "symbolList with #" << listLen << " entries";
 
 /* Convert TCl list parameter into STL container. */
-	std::vector<std::shared_ptr<bin_t>> query;
+	std::vector<std::shared_ptr<janku_t>> query;
 	for (int i = 0; i < listLen; i++)
 	{
 		Tcl_Obj* objPtr = nullptr;
@@ -560,25 +674,25 @@ LOG(INFO) << "objc = " << objc;
 
 		int len = 0;
 		char* symbol_text = Tcl_GetStringFromObj (objPtr, &len);
-		auto bin = std::make_shared<bin_t> (symbol_text, kDefaultLastPriceField, kDefaultTickVolumeField);
-		assert ((bool)bin);
+		auto janku = std::make_shared<janku_t> (symbol_text, kDefaultLastPriceField, kDefaultTickVolumeField);
+		assert ((bool)janku);
 		if (len > 0) {
-			query.push_back (bin);
-			DLOG(INFO) << "#" << (1 + i) << " " << symbol_text;
+			query.push_back (janku);
+			DVLOG(3) << "#" << (1 + i) << " " << symbol_text;
 		} else {
 			Tcl_SetResult (interp, "bad symbolList", TCL_STATIC);
 			return TCL_ERROR;
 		}
 	}
 
-	get_bin (query, start_time, end_time, day_count, TZ);
+	get_bin (bin, query);
 
-	LOG(INFO) << "query complete, compiling result set.";
+	DVLOG(3) << "query complete, compiling result set.";
 
 /* Convert STL container result set into a new Tcl list. */
 	Tcl_Obj* resultListPtr = Tcl_NewListObj (0, NULL);
 	std::for_each (query.begin(), query.end(),
-		[&](std::shared_ptr<bin_t> it)
+		[&](std::shared_ptr<janku_t> it)
 	{
 		const double tenday_pc_rounded     = portware_round (it->tenday_percentage_change);
 		const double fifteenday_pc_rounded = portware_round (it->fifteenday_percentage_change);
@@ -599,7 +713,7 @@ LOG(INFO) << "objc = " << objc;
 	});
 	Tcl_SetObjResult (interp, resultListPtr);
 
-	LOG(INFO) << "result set complete, returning.";
+	DVLOG(3) << "result set complete, returning.";
 
 	return TCL_OK;
 }
@@ -617,7 +731,7 @@ public:
 		stream_ << std::setfill ('0')
 /* 1: timeStamp : t_string : server receipt time, fixed format: YYYYMMDDhhmmss.ttt, e.g. 20120114060928.227 */
 			<< std::setw (4) << 1900 + tm_time.tm_year
-			<< std::setw (2) << tm_time.tm_mon
+			<< std::setw (2) << 1 + tm_time.tm_mon
 			<< std::setw (2) << tm_time.tm_mday
 			<< std::setw (2) << tm_time.tm_hour
 			<< std::setw (2) << tm_time.tm_min
@@ -694,6 +808,9 @@ gomi::gomi_t::tclFeedLogQuery (
 
 	DLOG(INFO) << "feedLogFile=" << feedlog_file;
 
+/* /bin/ declaration */
+	bin_t bin;
+
 /* timezone for time calculations */
 	len = 0;
 	const std::string region (Tcl_GetStringFromObj (objv[2], &len));
@@ -702,13 +819,13 @@ gomi::gomi_t::tclFeedLogQuery (
 		return TCL_ERROR;
 	}
 
-	boost::local_time::time_zone_ptr TZ = tzdb_.time_zone_from_region (region);
-	if (nullptr == TZ) {
+	bin.bin_tz = tzdb_.time_zone_from_region (region);
+	if (nullptr == bin.bin_tz) {
 		Tcl_SetResult (interp, "TZ not listed within configured time zone specifications", TCL_STATIC);
 		return TCL_ERROR;
 	}
 
-	DLOG(INFO) << "TZ=" << region;
+	DLOG(INFO) << "TZ=" << bin.bin_tz->std_zone_name();
 
 /* count of days for bin analytic */
 	long day_count = 0;
@@ -718,23 +835,24 @@ gomi::gomi_t::tclFeedLogQuery (
 		return TCL_ERROR;
 	}
 
-	DLOG(INFO) << "dayCount=" << day_count;
+	bin.bin_day_count = day_count;
+	DLOG(INFO) << "dayCount=" << bin.bin_day_count;
 
 /* startTime, not converted by "clock scan" as we require time-of-day only */
 	const std::string start_time_str (Tcl_GetStringFromObj (objv[5], &len));
-	boost::posix_time::time_duration start_time (boost::posix_time::duration_from_string (start_time_str));
+	bin.bin_start = boost::posix_time::duration_from_string (start_time_str);
 
 /* endTime */
 	const std::string end_time_str (Tcl_GetStringFromObj (objv[6], &len));
-	boost::posix_time::time_duration end_time (boost::posix_time::duration_from_string (end_time_str));
+	bin.bin_end = boost::posix_time::duration_from_string (end_time_str);
 
 /* Time must be ascending. */
-	if (end_time <= start_time) {
+	if (bin.bin_end <= bin.bin_start) {
 		Tcl_SetResult (interp, "endTime must be after startTime", TCL_STATIC);
 		return TCL_ERROR;
 	}
 
-	DLOG(INFO) << "startTime=" << start_time << ", endTime=" << end_time;
+	DLOG(INFO) << "startTime=" << bin.bin_start << ", endTime=" << bin.bin_end;
 
 /* symbolList must be a list object.
  * NB: VA 7.0 does not export Tcl_ListObjGetElements()
@@ -750,7 +868,7 @@ gomi::gomi_t::tclFeedLogQuery (
 	DLOG(INFO) << "symbolList with #" << listLen << " entries";
 
 /* Convert TCl list parameter into STL container. */
-	std::vector<std::shared_ptr<bin_t>> query;
+	std::vector<std::shared_ptr<janku_t>> query;
 	for (int i = 0; i < listLen; i++)
 	{
 		Tcl_Obj* objPtr = nullptr;
@@ -758,10 +876,10 @@ gomi::gomi_t::tclFeedLogQuery (
 
 		int len = 0;
 		char* symbol_text = Tcl_GetStringFromObj (objPtr, &len);
-		auto bin = std::make_shared<bin_t> (symbol_text, kDefaultLastPriceField, kDefaultTickVolumeField);
-		assert ((bool)bin);
+		auto janku = std::make_shared<janku_t> (symbol_text, kDefaultLastPriceField, kDefaultTickVolumeField);
+		assert ((bool)janku);
 		if (len > 0) {
-			query.push_back (bin);
+			query.push_back (janku);
 			DLOG(INFO) << "#" << (1 + i) << " " << symbol_text;
 		} else {
 			Tcl_SetResult (interp, "bad symbolList", TCL_STATIC);
@@ -769,11 +887,11 @@ gomi::gomi_t::tclFeedLogQuery (
 		}
 	}
 
-	get_bin (query, start_time, end_time, day_count, TZ);
+	get_bin (bin, query);
 		
 /* create flexrecord for each result */
 	std::for_each (query.begin(), query.end(),
-		[&](std::shared_ptr<bin_t> it)
+		[&](std::shared_ptr<janku_t> it)
 	{
 		std::ostringstream symbol_name;
 		symbol_name << it->symbol_name << config_.suffix;
@@ -792,7 +910,7 @@ gomi::gomi_t::tclFeedLogQuery (
 			    << it->average_volume << ',' << it->average_nonzero_volume << ','
 			    << it->total_moves << ','
 			    << it->maximum_moves << ','
-			    << it->minimum_moves << ',' << it->minimum_moves;
+			    << it->minimum_moves << ',' << it->smallest_moves;
 
 		DWORD written;
 		std::string line (fr.str());
@@ -826,7 +944,7 @@ gomi::gomi_t::tclRepublishQuery (
 	}
 
 	try {
-		sendRefresh();
+		dayRefresh();
 	} catch (rfa::common::InvalidUsageException& e) {
 		LOG(ERROR) << "InvalidUsageException: { "
 			"Severity: \"" << severity_string (e.getSeverity()) << "\""
@@ -853,7 +971,7 @@ gomi::gomi_t::processTimer (
 	}
 
 	try {
-		sendRefresh();
+		timeRefresh();
 	} catch (rfa::common::InvalidUsageException& e) {
 		LOG(ERROR) << "InvalidUsageException: { "
 			"Severity: \"" << severity_string (e.getSeverity()) << "\""
@@ -862,43 +980,203 @@ gomi::gomi_t::processTimer (
 	}
 }
 
-/* Calculate start of next interval.
+/* Calculate the next bin close timestamp for the requested timezone.
  */
-void
-gomi::gomi_t::get_next_interval (
-	FILETIME&	ft
+bool
+gomi::gomi_t::get_next_bin_close (
+	boost::local_time::time_zone_ptr tz,
+	FILETIME& ft
 	)
 {
-// TBD
+	if (bins_.empty())
+		return false;
+
+	using namespace boost::posix_time;
+	using namespace boost::local_time;
+
+/* calculate timezone reference time-of-day */
+	const auto now_utc = second_clock::universal_time();
+	local_date_time now_tz (now_utc, tz);
+	const auto td = now_tz.local_time().time_of_day();
+
+/* search key */
+	bin_t bin;
+	bin.bin_end = td;
+
+	auto it = bins_.upper_bound (bin);	/* > td (upper-bound) not >= td (lower-bound) */
+	if (bins_.end() == it) {
+		it = bins_.begin();	/* wrap around */
+		now_tz += hours (24);
+	}
+
+/* convert time-of-day into Microsoft FILETIME */
+	const local_date_time next_close (now_tz.local_time().date(), it->bin_end, tz, local_date_time::NOT_DATE_TIME_ON_ERROR);
+	DCHECK (!next_close.is_not_a_date_time());
+
+/* shift is difference between 1970-Jan-01 & 1601-Jan-01 in 100-nanosecond intervals.
+ */
+	const uint64_t shift = 116444736000000000ULL; // (27111902 << 32) + 3577643008
+
+	union {
+		FILETIME as_file_time;
+		uint64_t as_integer; // 100-nanos since 1601-Jan-01
+	} caster;
+	caster.as_integer = (next_close.utc_time() - ptime (kUnixEpoch)).total_microseconds() * 10; // upconvert to 100-nanos
+	caster.as_integer += shift; // now 100-nanos since 1601-Jan-01
+
+	ft = caster.as_file_time;
+	return true;
 }
 
-/* Calculate the __time32_t of the end of the last interval, specified in
- * seconds.
+/* Calculate the time-of-day of the last bin close.
  */
-void
-gomi::gomi_t::get_end_of_last_interval (
-	__time32_t&	t
+bool
+gomi::gomi_t::get_last_bin_close (
+	boost::local_time::time_zone_ptr tz,
+	boost::posix_time::time_duration* last_close
 	)
 {
-// TBD
+	if (bins_.empty())
+		return false;
+
+	using namespace boost::posix_time;
+	using namespace boost::local_time;
+
+/* calculate timezone reference time-of-day */
+	const auto now_utc = second_clock::universal_time();
+	const local_date_time now_tz (now_utc, tz);
+	const auto td = now_tz.local_time().time_of_day();
+
+/* search key */
+	bin_t bin;
+	bin.bin_end = td;
+
+	auto it = --(bins_.upper_bound (bin));	/* > td (upper-bound) not >= td (lower-bound) */
+	*last_close = it->bin_end;
+	return true;
 }
 
 /* http://msdn.microsoft.com/en-us/library/4ey61ayt.aspx */
 #define CTIME_LENGTH	26
 
+/* Refresh based upon time-of-day.  Archive & realtime bins.
+ */
 bool
-gomi::gomi_t::sendRefresh()
+gomi::gomi_t::timeRefresh()
 {
 	using namespace boost::posix_time;
 	const ptime t0 (microsec_clock::universal_time());
 	last_activity_ = t0;
 
 /* Calculate affected bins */
-//	...
-	time_duration start_time, end_time;
-	LOG(INFO) << "bind refresh " << start_time << "-" << end_time;
+	bin_t bin;
+	if (!get_last_bin_close (TZ_, &bin.bin_end)) {
+		LOG(ERROR) << "Cannot calculate last bin close time of day.";
+		return false;
+	}
 
-	get_bin (query_vector_, start_time, end_time, day_count_, TZ_);
+/* prevent replay except on daylight savings */
+	if (!last_refresh_.is_not_a_date_time() && last_refresh_ == bin.bin_end)
+		return false;
+
+/* constant iterator in C++11 */
+	unsigned bin_refresh_count = 0;
+	for (auto it = bins_.find (bin);
+		it != bins_.end() && it->bin_end == bin.bin_end;
+		++it)
+	{
+		binRefresh (*it);
+		++bin_refresh_count;
+	}
+
+	if (0 == bin_refresh_count)
+		return false;
+
+	summaryRefresh();
+
+/* save this iteration time */
+	last_refresh_ = bin.bin_end;
+	
+/* Timing */
+	const ptime t1 (microsec_clock::universal_time());
+	const time_duration td = t1 - t0;
+	LOG(INFO) << "refresh complete " << td.total_milliseconds() << "ms";
+	if (td < min_refresh_time_) min_refresh_time_ = td;
+	if (td > max_refresh_time_) max_refresh_time_ = td;
+	total_refresh_time_ += td;
+	return true;
+}
+
+/* Refresh entire days analytic content.
+ */
+bool
+gomi::gomi_t::dayRefresh()
+{
+	using namespace boost::posix_time;
+	using namespace boost::local_time;
+	const ptime t0 (microsec_clock::universal_time());
+	last_activity_ = t0;
+
+/* Calculate affected bins */
+	const auto now_utc = second_clock::universal_time();
+	const local_date_time now_tz (now_utc, TZ_);
+	const auto now_td = now_tz.local_time().time_of_day();
+
+/* constant iterator in C++11 */
+	for (auto it = query_vector_.begin(); it != query_vector_.end(); ++it) {
+		for (auto jt = it->second.first.begin(); jt != it->second.first.end(); ++jt) {
+			auto& janku = *jt;
+			janku->clear();
+		}
+	}
+
+	for (auto it = bins_.begin();
+		it != bins_.end() && it->bin_end <= now_td;
+		++it)
+	{
+		binRefresh (*it);
+
+/* save this iteration time */
+		last_refresh_ = it->bin_end;
+	}
+
+	summaryRefresh();
+
+/* Timing */
+	const ptime t1 (microsec_clock::universal_time());
+	const time_duration td = t1 - t0;
+	LOG(INFO) << "refresh complete " << td.total_milliseconds() << "ms";
+	if (td < min_refresh_time_) min_refresh_time_ = td;
+	if (td > max_refresh_time_) max_refresh_time_ = td;
+	total_refresh_time_ += td;
+	return true;
+}
+
+bool
+gomi::gomi_t::binRefresh (
+	const gomi::bin_t& ref_bin
+	)
+{
+/* fixed /bin/ parameters */
+	bin_t bin (ref_bin);
+	bin.bin_tz = TZ_;
+	bin.bin_day_count = std::stoi (config_.day_count);
+
+	DLOG(INFO) << "binRefresh ("
+		"bin: { "
+			"name: " << bin.bin_name << ", "
+			"start: " << bin.bin_start << ", "
+			"end: " << bin.bin_end << ", "
+			"tz: " << bin.bin_tz->std_zone_abbrev() << ", "
+			"day_count: " << bin.bin_day_count << " "
+		"}"
+		")";
+
+/* refreshes last /x/ business days, i.e. executing on a holiday will only refresh the cache contents */
+	auto& v = query_vector_[bin];
+	get_bin (bin, v.first);
+
+/**  (i) Refresh realtime RIC **/
 
 /* 7.5.9.1 Create a response message (4.2.2) */
 	rfa::message::RespMsg response (false);	/* reference */
@@ -941,17 +1219,18 @@ gomi::gomi_t::sendRefresh()
 	rfa::data::FieldListWriteIterator it;
 	rfa::data::FieldEntry timeact_field (false), activ_date_field (false), price_field (false), integer_field (false);
 	rfa::data::DataBuffer timeact_data (false), activ_date_data (false), price_data (false), integer_data (false);
-	rfa::data::Real64 real64;
+	rfa::data::Real64 real64, integer64;
 	rfa::data::Time rfaTime;
 	rfa::data::Date rfaDate;
 	struct tm _tm;
 
 /* TIMEACT */
+	assert (!v.first.empty());
+	const auto& first = v.first[0];
+	using namespace boost::posix_time;
 	timeact_field.setFieldID (kRdmTimeOfUpdateId);
-
-// TODO: calculate timestamp
-__time32_t timestamp = 0;
-	_gmtime32_s (&_tm, &timestamp);
+	__time32_t time32 = (first->close_time - ptime (kUnixEpoch)).total_seconds();
+	_gmtime32_s (&_tm, &time32);
 	rfaTime.setHour   (_tm.tm_hour);
 	rfaTime.setMinute (_tm.tm_min);
 	rfaTime.setSecond (_tm.tm_sec);
@@ -964,7 +1243,9 @@ __time32_t timestamp = 0;
 	price_data.setReal64 (real64);
 	price_field.setData (price_data);
 
-/* AVGVOL_20D, etc, as integer field type */
+/* VMA_20D, etc, as integer field type */
+	integer64.setMagnitudeType (rfa::data::Exponent0);
+	integer_data.setReal64 (integer64);
 	integer_field.setData (integer_data);
 
 /* ACTIV_DATE */
@@ -984,9 +1265,10 @@ __time32_t timestamp = 0;
 	status.setStatusCode (rfa::common::RespStatus::NoneEnum);
 	response.setRespStatus (status);
 
-	std::for_each (stream_vector_.begin(), stream_vector_.end(),
-		[&](std::shared_ptr<broadcast_stream_t>& stream)
+	std::for_each (v.second.begin(), v.second.end(),
+		[&](std::shared_ptr<archive_stream_t>& stream)
 	{
+		VLOG(1) << "publish: " << stream->rfa_name;
 		attribInfo.setName (stream->rfa_name);
 		it.start (fields_);
 /* TIMACT */
@@ -997,43 +1279,43 @@ __time32_t timestamp = 0;
  * source value and consider that we publish to 6 decimal places.
  */
 /* PCTCHG_10D */
-		price_field.setFieldID (kRdm10DayPercentChangeId);
-		const int64_t pctchg_10d_mantissa = portware_mantissa (stream->bin->tenday_percentage_change);
+		price_field.setFieldID (config_.archive_fids.Rdm10DayPercentChangeId);
+		const int64_t pctchg_10d_mantissa = portware_mantissa (stream->janku->tenday_percentage_change);
 		real64.setValue (pctchg_10d_mantissa);		
 		it.bind (price_field);
 /* PCTCHG_15D */
-		price_field.setFieldID (kRdm15DayPercentChangeId);
-		const int64_t pctchg_15d_mantissa = portware_mantissa (stream->bin->fifteenday_percentage_change);
+		price_field.setFieldID (config_.archive_fids.Rdm15DayPercentChangeId);
+		const int64_t pctchg_15d_mantissa = portware_mantissa (stream->janku->fifteenday_percentage_change);
 		real64.setValue (pctchg_15d_mantissa);		
 		it.bind (price_field);
 /* PCTCHG_20D */
-		price_field.setFieldID (kRdm20DayPercentChangeId);
-		const int64_t pctchg_20d_mantissa = portware_mantissa (stream->bin->twentyday_percentage_change);
+		price_field.setFieldID (config_.archive_fids.Rdm20DayPercentChangeId);
+		const int64_t pctchg_20d_mantissa = portware_mantissa (stream->janku->twentyday_percentage_change);
 		real64.setValue (pctchg_20d_mantissa);		
 		it.bind (price_field);
-/* AVGVOL_20D */
-		integer_field.setFieldID (kRdmAverageVolumeId);
-		integer_data.setUInt64 (stream->bin->average_volume);
+/* VMA_20D */
+		integer_field.setFieldID (config_.archive_fids.RdmAverageVolumeId);
+		integer64.setValue (stream->janku->average_volume);
 		it.bind (integer_field);
-/* AVGRVL_20D */
-		integer_field.setFieldID (kRdmAverageNonZeroVolumeId);
-		integer_data.setUInt64 (stream->bin->average_nonzero_volume);
+/* VMA_20TD */
+		integer_field.setFieldID (config_.archive_fids.RdmAverageNonZeroVolumeId);
+		integer64.setValue (stream->janku->average_nonzero_volume);
 		it.bind (integer_field);
-/* COUNT_20D */
-		integer_field.setFieldID (kRdmTotalMovesId);
-		integer_data.setUInt64 (stream->bin->total_moves);
+/* TRDCNT_20D */
+		integer_field.setFieldID (config_.archive_fids.RdmTotalMovesId);
+		integer64.setValue (stream->janku->total_moves);
 		it.bind (integer_field);
 /* HICNT_20D */
-		integer_field.setFieldID (kRdmMaximumMovesId);
-		integer_data.setUInt64 (stream->bin->maximum_moves);
+		integer_field.setFieldID (config_.archive_fids.RdmMaximumMovesId);
+		integer64.setValue (stream->janku->maximum_moves);
 		it.bind (integer_field);
 /* LOCNT_20D */
-		integer_field.setFieldID (kRdmMinimumMovesId);
-		integer_data.setUInt64 (stream->bin->minimum_moves);
+		integer_field.setFieldID (config_.archive_fids.RdmMinimumMovesId);
+		integer64.setValue (stream->janku->minimum_moves);
 		it.bind (integer_field);
 /* SMCNT_20D */
-		integer_field.setFieldID (kRdmSmallestMovesId);
-		integer_data.setUInt64 (stream->bin->smallest_moves);
+		integer_field.setFieldID (config_.archive_fids.RdmSmallestMovesId);
+		integer64.setValue (stream->janku->smallest_moves);
 		it.bind (integer_field);
 /* ACTIV_DATE */
 		it.bind (activ_date_field);
@@ -1054,18 +1336,209 @@ __time32_t timestamp = 0;
 		}
 #endif
 		provider_->send (*stream.get(), static_cast<rfa::common::Msg&> (response));
-
-/* reset analytic result set so next query starts from a blank state */
-		stream->bin->clear();
 	});
 
-/* Timing */
-	const ptime t1 (microsec_clock::universal_time());
-	const time_duration td = t1 - t0;
-	LOG(INFO) << "refresh complete " << td.total_milliseconds() << "ms";
-	if (td < min_refresh_time_) min_refresh_time_ = td;
-	if (td > max_refresh_time_) max_refresh_time_ = td;
-	total_refresh_time_ += td;
+	return true;
+}
+
+/* Refresh summary bin analytics, i.e. the realtime set of bins including
+ * a special last 10-minute bin derived from the current time-of-day.
+ */
+bool
+gomi::gomi_t::summaryRefresh ()
+{
+	using namespace boost::posix_time;
+	using namespace boost::local_time;
+
+	ptime close_time (neg_infin);
+	bin_t last_10min_bin;
+	bool has_last_10min_bin = false;
+
+/* find close time of last bin suitable for timestamp */
+/* walk entire archive data set for most recent non-null janku and capture timestamp */
+	for (auto it = query_vector_.begin(); it != query_vector_.end(); ++it) {
+		auto jt = it->second.first.begin();
+		if ((*jt)->is_null)
+			break;
+		close_time = (*jt)->close_time;
+		if (!is_special_bin (it->first)) {
+			has_last_10min_bin = true;
+			last_10min_bin = it->first;
+		}
+	}
+
+/* no analytics found */
+	if (close_time.is_neg_infinity())
+		return false;
+
+/* 7.5.9.1 Create a response message (4.2.2) */
+	rfa::message::RespMsg response (false);	/* reference */
+
+/* 7.5.9.2 Set the message model type of the response. */
+	response.setMsgModelType (rfa::rdm::MMT_MARKET_PRICE);
+/* 7.5.9.3 Set response type. */
+	response.setRespType (rfa::message::RespMsg::RefreshEnum);
+	response.setIndicationMask (rfa::message::RespMsg::RefreshCompleteFlag);
+/* 7.5.9.4 Set the response type enumation. */
+	response.setRespTypeNum (rfa::rdm::REFRESH_UNSOLICITED);
+
+/* 7.5.9.5 Create or re-use a request attribute object (4.2.4) */
+	rfa::message::AttribInfo attribInfo (false);	/* reference */
+	attribInfo.setNameType (rfa::rdm::INSTRUMENT_NAME_RIC);
+	RFA_String service_name (config_.service_name.c_str(), 0, false);	/* reference */
+	attribInfo.setServiceName (service_name);
+	response.setAttribInfo (attribInfo);
+
+/* 6.2.8 Quality of Service. */
+	rfa::common::QualityOfService QoS;
+/* Timeliness: age of data, either real-time, unspecified delayed timeliness,
+ * unspecified timeliness, or any positive number representing the actual
+ * delay in seconds.
+ */
+	QoS.setTimeliness (rfa::common::QualityOfService::realTime);
+/* Rate: minimum period of change in data, either tick-by-tick, just-in-time
+ * filtered rate, unspecified rate, or any positive number representing the
+ * actual rate in milliseconds.
+ */
+	QoS.setRate (rfa::common::QualityOfService::tickByTick);
+	response.setQualityOfService (QoS);
+
+/* 4.3.1 RespMsg.Payload */
+// not std::map :(  derived from rfa::common::Data
+	fields_.setAssociatedMetaInfo (provider_->getRwfMajorVersion(), provider_->getRwfMinorVersion());
+	fields_.setInfo (kDictionaryId, kFieldListId);
+
+/* DataBuffer based fields must be pre-encoded and post-bound. */
+	rfa::data::FieldListWriteIterator it;
+	rfa::data::FieldEntry timeact_field (false), activ_date_field (false), price_field (false), integer_field (false);
+	rfa::data::DataBuffer timeact_data (false), activ_date_data (false), price_data (false), integer_data (false);
+	rfa::data::Real64 real64, integer64;
+	rfa::data::Time rfaTime;
+	rfa::data::Date rfaDate;
+	struct tm _tm;
+
+/* TIMEACT */
+	using namespace boost::posix_time;
+	timeact_field.setFieldID (kRdmTimeOfUpdateId);
+	__time32_t time32 = (close_time - ptime (kUnixEpoch)).total_seconds();
+	_gmtime32_s (&_tm, &time32);
+	rfaTime.setHour   (_tm.tm_hour);
+	rfaTime.setMinute (_tm.tm_min);
+	rfaTime.setSecond (_tm.tm_sec);
+	rfaTime.setMillisecond (0);
+	timeact_data.setTime (rfaTime);
+	timeact_field.setData (timeact_data);
+
+/* PCTCHG_10D, etc, as PRICE field type */
+	real64.setMagnitudeType (rfa::data::ExponentNeg6);
+	price_data.setReal64 (real64);
+	price_field.setData (price_data);
+
+/* VMA_20D, etc, as integer field type */
+	integer64.setMagnitudeType (rfa::data::Exponent0);
+	integer_data.setReal64 (integer64);
+	integer_field.setData (integer_data);
+
+/* ACTIV_DATE */
+	activ_date_field.setFieldID (kRdmActiveDateId);
+	rfaDate.setDay   (/* rfa(1-31) */ _tm.tm_mday        /* tm(1-31) */);
+	rfaDate.setMonth (/* rfa(1-12) */ 1 + _tm.tm_mon     /* tm(0-11) */);
+	rfaDate.setYear  (/* rfa(yyyy) */ 1900 + _tm.tm_year /* tm(yyyy-1900 */);
+	activ_date_data.setDate (rfaDate);
+	activ_date_field.setData (activ_date_data);
+
+	rfa::common::RespStatus status;
+/* Item interaction state: Open, Closed, ClosedRecover, Redirected, NonStreaming, or Unspecified. */
+	status.setStreamState (rfa::common::RespStatus::OpenEnum);
+/* Data quality state: Ok, Suspect, or Unspecified. */
+	status.setDataState (rfa::common::RespStatus::OkEnum);
+/* Error code, e.g. NotFound, InvalidArgument, ... */
+	status.setStatusCode (rfa::common::RespStatus::NoneEnum);
+	response.setRespStatus (status);
+
+	std::for_each (stream_vector_.begin(), stream_vector_.end(),
+		[&](std::shared_ptr<realtime_stream_t>& stream)
+	{
+		VLOG(1) << "publish: " << stream->rfa_name;
+		attribInfo.setName (stream->rfa_name);
+		it.start (fields_);
+/* TIMACT */
+		it.bind (timeact_field);
+
+		auto add_fidset = [&](const fidset_t& fids, std::shared_ptr<janku_t> janku)
+		{
+/* PCTCHG_10D */
+			price_field.setFieldID (fids.Rdm10DayPercentChangeId);
+			const int64_t pctchg_10d_mantissa = portware_mantissa (janku->tenday_percentage_change);
+			real64.setValue (pctchg_10d_mantissa);		
+			it.bind (price_field);
+/* PCTCHG_15D */
+			price_field.setFieldID (fids.Rdm15DayPercentChangeId);
+			const int64_t pctchg_15d_mantissa = portware_mantissa (janku->fifteenday_percentage_change);
+			real64.setValue (pctchg_15d_mantissa);		
+			it.bind (price_field);
+/* PCTCHG_20D */
+			price_field.setFieldID (fids.Rdm20DayPercentChangeId);
+			const int64_t pctchg_20d_mantissa = portware_mantissa (janku->twentyday_percentage_change);
+			real64.setValue (pctchg_20d_mantissa);		
+			it.bind (price_field);
+/* VMA_20D */
+			integer_field.setFieldID (fids.RdmAverageVolumeId);
+			integer64.setValue (janku->average_volume);
+			it.bind (integer_field);
+/* VMA_20TD */
+			integer_field.setFieldID (fids.RdmAverageNonZeroVolumeId);
+			integer64.setValue (janku->average_nonzero_volume);
+			it.bind (integer_field);
+/* TRDCNT_20D */
+			integer_field.setFieldID (fids.RdmTotalMovesId);
+			integer64.setValue (janku->total_moves);
+			it.bind (integer_field);
+/* HICNT_20D */
+			integer_field.setFieldID (fids.RdmMaximumMovesId);
+			integer64.setValue (janku->maximum_moves);
+			it.bind (integer_field);
+/* LOCNT_20D */
+			integer_field.setFieldID (fids.RdmMinimumMovesId);
+			integer64.setValue (janku->minimum_moves);
+			it.bind (integer_field);
+/* SMCNT_20D */
+			integer_field.setFieldID (fids.RdmSmallestMovesId);
+			integer64.setValue (janku->smallest_moves);
+			it.bind (integer_field);
+		};
+
+/* every special named bin analytic */
+		std::for_each (stream->special.begin(), stream->special.end(),
+			[&](std::pair<fidset_t, std::shared_ptr<archive_stream_t>> archive)
+		{
+			add_fidset (archive.first, archive.second->janku);
+		});
+
+/* last 10-minute special bin */
+		if (has_last_10min_bin)
+			add_fidset (stream->last_10min.first, stream->last_10min.second[last_10min_bin]->janku);
+
+/* ACTIV_DATE */
+		it.bind (activ_date_field);
+		it.complete();
+		response.setPayload (fields_);
+
+#ifdef DEBUG
+/* 4.2.8 Message Validation.  RFA provides an interface to verify that
+ * constructed messages of these types conform to the Reuters Domain
+ * Models as specified in RFA API 7 RDM Usage Guide.
+ */
+		RFA_String warningText;
+		const uint8_t validation_status = response.validateMsg (&warningText);
+		if (rfa::message::MsgValidationWarning == validation_status) {
+			LOG(ERROR) << "respMsg::validateMsg: { warningText: \"" << warningText << "\" }";
+		} else {
+			assert (rfa::message::MsgValidationOk == validation_status);
+		}
+#endif
+		provider_->send (*stream.get(), static_cast<rfa::common::Msg&> (response));
+	});
 
 	return true;
 }

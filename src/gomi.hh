@@ -34,6 +34,7 @@
 
 #include "config.hh"
 #include "provider.hh"
+#include "get_bin.hh"
 
 namespace logging
 {
@@ -58,21 +59,36 @@ namespace gomi
 		GOMI_PC_MAX
 	};
 
-	class bin_t;
 	class rfa_t;
 	class provider_t;
 	class snmp_agent_t;
 
-/* Basic state for each item stream. */
-	class broadcast_stream_t : public item_stream_t
+/* Archive streams match a specific bin analytic query. */
+	class archive_stream_t : public item_stream_t
 	{
 	public:
-		broadcast_stream_t (std::shared_ptr<bin_t> bin_) :
-			bin (bin_)
+		archive_stream_t (std::shared_ptr<janku_t> janku_) :
+			janku (janku_)
 		{
 		}
 
-		std::shared_ptr<bin_t> bin;
+		std::shared_ptr<janku_t> janku;
+	};
+
+/* Realtime streams are a set of multiple archive streams. */
+	class realtime_stream_t : public item_stream_t
+	{
+	public:
+		realtime_stream_t (const std::string& symbol_name_) :
+			symbol_name (symbol_name_)
+		{
+		}
+
+/* source feed name, not the name of the derived feed symbol */
+		std::string symbol_name;
+		std::vector<std::pair<fidset_t, std::shared_ptr<archive_stream_t>>> special;
+/* last 10-minute bin requires custom handling */
+		std::pair<fidset_t, std::map<bin_t, std::shared_ptr<archive_stream_t>, bin_openclose_compare_t>> last_10min;
 	};
 
 	struct flex_filter_t
@@ -137,11 +153,16 @@ namespace gomi
 		int tclFeedLogQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 		int tclRepublishQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 
-		void get_next_interval (FILETIME& ft);
-		void get_end_of_last_interval (__time32_t& t);
+		bool is_special_bin (const bin_t& bin);
 
-/* Broadcast out message. */
-		bool sendRefresh() throw (rfa::common::InvalidUsageException);
+		bool get_next_bin_close (boost::local_time::time_zone_ptr tz, FILETIME& ft);
+		bool get_last_bin_close (boost::local_time::time_zone_ptr tz, boost::posix_time::time_duration* last_close);
+
+/* Broadcast out messages. */
+		bool timeRefresh() throw (rfa::common::InvalidUsageException);
+		bool dayRefresh() throw (rfa::common::InvalidUsageException);
+		bool binRefresh (const bin_t& bin) throw (rfa::common::InvalidUsageException);
+		bool summaryRefresh() throw (rfa::common::InvalidUsageException);
 
 /* Unique instance number per process. */
 		LONG instance_;
@@ -192,13 +213,18 @@ namespace gomi
 /* Configured time zone */
 		boost::local_time::time_zone_ptr TZ_;
 
-/* Default length of analytics */
-		unsigned day_count_;
+/* Parsed bin decls sorted by close time */
+		std::set<bin_t, bin_openclose_compare_t> bins_;
+
+/* last refresh time-of-day, default to not_a_date_time */
+		boost::posix_time::time_duration last_refresh_;
 
 /* Publish instruments. */
-		std::vector<std::shared_ptr<bin_t>> query_vector_;
-		std::vector<std::shared_ptr<broadcast_stream_t>> stream_vector_;
+		std::map<bin_t, std::pair<std::vector<std::shared_ptr<janku_t>>,
+					  std::vector<std::shared_ptr<archive_stream_t>>
+					 >, bin_openclose_compare_t> query_vector_;
 		boost::shared_mutex query_mutex_;
+		std::vector<std::shared_ptr<realtime_stream_t>> stream_vector_;
 
 /* Event pump and thread. */
 		std::unique_ptr<event_pump_t> event_pump_;

@@ -99,13 +99,39 @@ gomi::config_t::validate()
 		LOG(ERROR) << "Undefined default analytic time period.";
 		return false;
 	}
-	if (archive_fids.empty()) {
-		LOG(ERROR) << "Undefined archive FID list.";
+	if (!archive_fids.RdmAverageVolumeId ||
+	    !archive_fids.RdmAverageNonZeroVolumeId ||
+	    !archive_fids.RdmTotalMovesId ||
+	    !archive_fids.RdmMaximumMovesId ||
+	    !archive_fids.RdmMinimumMovesId ||
+	    !archive_fids.RdmSmallestMovesId ||
+	    !archive_fids.Rdm10DayPercentChangeId ||
+	    !archive_fids.Rdm15DayPercentChangeId ||
+	    !archive_fids.Rdm20DayPercentChangeId)
+	{
+		LOG(ERROR) << "Undefined archive FID set.";
 		return false;
 	}
 	if (realtime_fids.empty()) {
 		LOG(ERROR) << "Undefined realtime FID list.";
 		return false;
+	}
+	for (auto it = realtime_fids.begin(); it != realtime_fids.end(); ++it)
+	{
+		if (it->first.empty() ||
+		    !it->second.RdmAverageVolumeId ||
+		    !it->second.RdmAverageNonZeroVolumeId ||
+		    !it->second.RdmTotalMovesId ||
+		    !it->second.RdmMaximumMovesId ||
+		    !it->second.RdmMinimumMovesId ||
+		    !it->second.RdmSmallestMovesId ||
+		    !it->second.Rdm10DayPercentChangeId ||
+		    !it->second.Rdm15DayPercentChangeId ||
+		    !it->second.Rdm20DayPercentChangeId)
+		{
+			LOG(ERROR) << "Undefined realtime FID set.";
+			return false;
+		}
 	}
 	if (bins.empty()) {
 		LOG(ERROR) << "Undefined bin list.";
@@ -553,7 +579,7 @@ gomi::config_t::parseGomiNode (
 		day_count = attr;
 
 /* reset all lists */
-	archive_fids.clear();
+	ZeroMemory (&archive_fids, sizeof (archive_fids));
 	realtime_fids.clear();
 	bins.clear();
 /* <fields> */
@@ -624,13 +650,11 @@ gomi::config_t::parseArchiveNode (
 /* <fid> */
 	nodeList = elem->getElementsByTagName (L"fid");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		std::string fid;
-		if (!parseFidNode (nodeList->item (i), fid)) {
+		if (!parseFidNode (nodeList->item (i), archive_fids)) {
 			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
 			LOG(ERROR) << "Failed parsing <fid> nth-node #" << (1 + i) << ": \"" << text_content << "\".";
 			return false;
 		}
-		archive_fids.push_back (fid);
 	}
 	if (0 == nodeList->getLength())
 		LOG(WARNING) << "No <fid> nodes found.";
@@ -639,17 +663,13 @@ gomi::config_t::parseArchiveNode (
 
 /* Convert Xml node from:
  *
- *	<fid name="TIMACT">5</fid>
- *
- * into:
- *
- *	"TIMACT=5"
+ *	<fid name="TIMACT" value="5"/>
  */
 
 bool
 gomi::config_t::parseFidNode (
 	const DOMNode*		node,
-	std::string&		fid
+	gomi::fidset_t&		fidset
 	)
 {
 	const DOMElement* elem = static_cast<const DOMElement*>(node);
@@ -666,13 +686,30 @@ gomi::config_t::parseFidNode (
 		return false;
 	}
 
-	const std::string fid_value = xml.transcode (elem->getTextContent());
+/* convenient inlining */
+	int* fid = nullptr;
+	if ("VMA" == name)		fid = &fidset.RdmAverageVolumeId;
+	else if ("NZERO_VMA" == name)	fid = &fidset.RdmAverageNonZeroVolumeId;
+	else if ("NUM_MOVES" == name)	fid = &fidset.RdmTotalMovesId;
+	else if ("NM_HIGH" == name)	fid = &fidset.RdmMaximumMovesId;
+	else if ("NM_LOW" == name)	fid = &fidset.RdmMinimumMovesId;
+	else if ("NM_SMALL" == name)	fid = &fidset.RdmSmallestMovesId;
+	else if ("PCTCHG_10D" == name)	fid = &fidset.Rdm10DayPercentChangeId;
+	else if ("PCTCHG_15D" == name)	fid = &fidset.Rdm15DayPercentChangeId;
+	else if ("PCTCHG_20D" == name)	fid = &fidset.Rdm20DayPercentChangeId;
+	else {
+		LOG(ERROR) << "Unknown \"name\" attribute value \"" << name << "\".";
+		return false;
+	}
 
-	std::ostringstream os;
-	os << name << '=' << std::stoi (fid_value);
+/* value="fid" */
+	const std::string value = xml.transcode (elem->getAttribute (L"value"));
+	if (value.empty()) {
+		LOG(ERROR) << "Undefined \"value\" attribute, value cannot be empty.";
+		return false;
+	}
 
-	fid = os.str();
-
+	*fid = std::stoi (value);
 	return true;
 }
 
@@ -708,19 +745,26 @@ gomi::config_t::parseRealtimeBinNode (
 	vpf::XMLStringPool xml;
 	const DOMNodeList* nodeList;
 
+/* name="bin name" */
+	const std::string name = xml.transcode (elem->getAttribute (L"name"));
+	if (name.empty()) {
+		LOG(ERROR) << "Undefined \"name\" attribute, value cannot be empty.";
+		return false;
+	}
+
 /* <fid> */
+	fidset_t fidset;
 	nodeList = elem->getElementsByTagName (L"fid");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		std::string fid;
-		if (!parseFidNode (nodeList->item (i), fid)) {
+		if (!parseFidNode (nodeList->item (i), fidset)) {
 			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
 			LOG(ERROR) << "Failed parsing <fid> nth-node #" << (1 + i) << ": \"" << text_content << "\".";
 			return false;
 		}
-		realtime_fids.push_back (fid);
 	}
 	if (0 == nodeList->getLength())
 		LOG(WARNING) << "No <fid> nodes found.";
+	realtime_fids.emplace (std::make_pair (name, fidset));
 	return true;
 }
 

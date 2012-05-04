@@ -99,68 +99,101 @@
 	<Gomi
 		interval="600"
 		symbolmap="C:/Vhayu/Config/symbolmap.txt"
-		suffix="VTA"
+		suffix="=VTA"
 		TZDB="C:/Vhayu/Config/date_time_zonespec.csv"
 		TZ=”America/New_York”
 		dayCount="20">
 
 		<fields>
 			<archive>
-				<fid name="TIMACT">5</fid>
-				<fid name="ACTIV_DATE">17</fid>
-				<fid name="AVGVOL_20D">-100</fid>
-				<fid name="COUNT_20D">-101</fid>
-				<fid name="HICNT_20D">-102</fid>
-				<fid name="LOCNT_20D">-103</fid>
-				<fid name="PCTCHG_10D">3726</fid>
-				<fid name="PCTCHG_15D">-104</fid>
-				<fid name="PCTCHG_20D">-105</fid>
+				<fid name="VMA"        value="-100"/>
+				<fid name="NZERO_VMA"  value="-101"/>
+				<fid name="NUM_MOVES"  value="-102"/>
+				<fid name="NM_HIGH"    value="-103"/>
+				<fid name="NM_LOW"     value="-104"/>
+				<fid name="NM_SMALL"   value="-105"/>
+				<fid name="PCTCHG_10D" value="3726"/>
+				<fid name="PCTCHG_15D" value="-106"/>
+				<fid name="PCTCHG_20D" value="-107"/>
 			</archive>
 			<realtime>
 				<bin name="OPEN">
-					<fid name="OPBIN_20D_AVGVOL">-1</fid>
-					<fid name="OPBIN_20D_COUNT">-2</fid>
-					<fid name="OPBIN_20D_HICNT">-3</fid>
-					<fid name="OPBIN_20D_LOCNT">-4</fid>
-					<fid name="OPBIN_10D_PC">-5</fid>
-					<fid name="OPBIN_15D_PC">-6</fid>
-					<fid name="OPBIN_20D_PC">-7</fid>
+					<fid name="VMA"        value="-108"/>
+					<fid name="NZERO_VMA"  value="-115"/>
+					<fid name="NUM_MOVES"  value="-122"/>
+					<fid name="NM_HIGH"    value="-129"/>
+					<fid name="NM_LOW"     value="-136"/>
+					<fid name="NM_SMALL"   value="-143"/>
+					<fid name="PCTCHG_10D" value="-150"/>
+					<fid name="PCTCHG_15D" value="-151"/>
+					<fid name="PCTCHG_20D" value="-152"/>
+				</bin>
+				<bin name="OPEN2">
+					<fid name="VMA"        value="-109"/>
+					<fid name="NZERO_VMA"  value="-116"/>
+					<fid name="NUM_MOVES"  value="-123"/>
+					<fid name="NM_HIGH"    value="-130"/>
+					<fid name="NM_LOW"     value="-137"/>
+					<fid name="NM_SMALL"   value="-144"/>
+					<fid name="PCTCHG_10D" value="-153"/>
+					<fid name="PCTCHG_15D" value="-154"/>
+					<fid name="PCTCHG_20D" value="-155"/>
 				</bin>
 				<bin name="CLOSE">
-					<fid name="CLBIN_20D_AVGVOL">-15</fid>
-					<fid name="CLBIN_20D_COUNT">-16</fid>
-					<fid name="CLBIN_20D_HICNT">-17</fid>
-					<fid name="CLBIN_20D_LOCNT">-18</fid>
-					<fid name="CLBIN_10D_PC">-19</fid>
-					<fid name="CLBIN_15D_PC">-20</fid>
-					<fid name="CLBIN_20D_PC">-21</fid>
+					<fid name="VMA"        value="-110"/>
+					<fid name="NZERO_VMA"  value="-117"/>
+					<fid name="NUM_MOVES"  value="-124"/>
+					<fid name="NM_HIGH"    value="-131"/>
+					<fid name="NM_LOW"     value="-138"/>
+					<fid name="NM_SMALL"   value="-145"/>
+					<fid name="PCTCHG_10D" value="-156"/>
+					<fid name="PCTCHG_15D" value="-157"/>
+					<fid name="PCTCHG_20D" value="-158"/>
+				</bin>
+				<bin name="CLOSE2">
+					<fid name="VMA"        value="-111"/>
+					<fid name="NZERO_VMA"  value="-118"/>
+					<fid name="NUM_MOVES"  value="-125"/>
+					<fid name="NM_HIGH"    value="-132"/>
+					<fid name="NM_LOW"     value="-139"/>
+					<fid name="NM_SMALL"   value="-146"/>
+					<fid name="PCTCHG_10D" value="-159"/>
+					<fid name="PCTCHG_15D" value="-160"/>
+					<fid name="PCTCHG_20D" value="-161"/>
 				</bin>
 				<bin name="FIRST">
-					<fid name="1STBIN_20D_AVGVOL">-29</fid>
-					<fid name="1STBIN_20D_COUNT">-30</fid>
-					<fid name="1STBIN_20D_HICNT">-31</fid>
-					<fid name="1STBIN_20D_LOCNT">-32</fid>
-					<fid name="1STBIN_10D_PC">-33</fid>
-					<fid name="1STBIN_15D_PC">-34</fid>
-					<fid name="1STBIN_20D_PC">-35</fid>
+					<fid name="VMA"        value="-112"/>
+					<fid name="NZERO_VMA"  value="-119"/>
+					<fid name="NUM_MOVES"  value="-126"/>
+					<fid name="NM_HIGH"    value="-133"/>
+					<fid name="NM_LOW"     value="-140"/>
+					<fid name="NM_SMALL"   value="-147"/>
+					<fid name="PCTCHG_10D" value="-162"/>
+					<fid name="PCTCHG_15D" value="-163"/>
+					<fid name="PCTCHG_20D" value="-164"/>
 				</bin>
 				<bin name="LAST">
-					<fid name="LSTBIN_20D_AVGVOL">-36</fid>
-					<fid name="LSTBIN_20D_COUNT">-37</fid>
-					<fid name="LSTBIN_20D_HICNT">-38</fid>
-					<fid name="LSTBIN_20D_LOCNT">-39</fid>
-					<fid name="LSTBIN_10D_PC">-40</fid>
-					<fid name="LSTBIN_15D_PC">-41</fid>
-					<fid name="LSTBIN_20D_PC">-42</fid>
+					<fid name="VMA"        value="-113"/>
+					<fid name="NZERO_VMA"  value="-120"/>
+					<fid name="NUM_MOVES"  value="-127"/>
+					<fid name="NM_HIGH"    value="-134"/>
+					<fid name="NM_LOW"     value="-141"/>
+					<fid name="NM_SMALL"   value="-148"/>
+					<fid name="PCTCHG_10D" value="-165"/>
+					<fid name="PCTCHG_15D" value="-166"/>
+					<fid name="PCTCHG_20D" value="-167"/>
 				</bin>
 				<bin name="10MIN">
-					<fid name="10MNBIN_20D_AVGVOL">-43</fid>
-					<fid name="10MNBIN_20D_COUNT">-44</fid>
-					<fid name="10MNBIN_20D_HICNT">-45</fid>
-					<fid name="10MNBIN_20D_LOCNT">-46</fid>
-					<fid name="10MNBIN_10D_PC">-47</fid>
-					<fid name="10MNBIN_15D_PC">-48</fid>
-					<fid name="10MNBIN_20D_PC">-49</fid>
+					<fid name="VMA"        value="-114"/>
+					<fid name="NZERO_VMA"  value="-121"/>
+					<fid name="NUM_MOVES"  value="-128"/>
+					<fid name="NM_HIGH"    value="-135"/>
+					<fid name="NM_LOW"     value="-142"/>
+					<fid name="NM_SMALL"   value="-149"/>
+					<fid name="PCTCHG_10D" value="-168"/>
+					<fid name="PCTCHG_15D" value="-169"/>
+					<fid name="PCTCHG_20D" value="-170"/>
+
 				</bin>
 			</realtime>
 		</fields>
@@ -170,14 +203,26 @@
 				<time>9:25</time>
 				<time>9:30</time>
 			</bin>
+<!-- OPEN + pre-market -->
+			<bin name="OPEN2">
+				<time>4:00</time>
+				<time>9:30</time>
+			</bin>
 			<bin name="CLOSE">
 				<time>16:00</time>
 				<time>16:05</time>
 			</bin>
+<!-- CLOSE + post-market -->
+			<bin name="CLOSE2">
+				<time>16:00</time>
+				<time>20:00</time>
+			</bin>
+<!-- First hour of trading -->
 			<bin name="FIRST">
 				<time>9:30</time>
 				<time>10:30</time>
 			</bin>
+<!-- Last hour of trading -->
 			<bin name="LAST">
 				<time>15:00</time>
 				<time>16:00</time>

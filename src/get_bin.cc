@@ -7,6 +7,8 @@
 #include <functional>
 #include <list>
 
+#include "boost/date_time/gregorian/gregorian.hpp"
+
 /* Velocity Analytics Plugin Framework */
 #include <vpf/vpf.h>
 #include <FlexRecReader.h>
@@ -20,6 +22,21 @@ static const uint32_t kTradeId = 40001;
 /* http://en.wikipedia.org/wiki/Unix_epoch */
 static const boost::gregorian::date kUnixEpoch (1970, 1, 1);
 
+/* Is today<date> a business day, per TBSDK.  Assumes local calendar as per TBSDK.
+ */
+static
+bool
+is_business_day (
+	const boost::gregorian::date d
+	)
+{
+	using namespace boost::posix_time;
+	assert (!d.is_not_a_date());
+	const __time32_t time32 = (ptime (d) - ptime (kUnixEpoch)).total_seconds();
+	BusinessDayInfo bd;
+	return (0 != TBPrimitives::BusinessDay (time32, &bd));
+}
+
 /* Calcaulte the __time32_t of the start and end of each time slice for
  * bin parameters provided.
  */
@@ -30,8 +47,8 @@ get_bin_window (
 	const boost::local_time::time_zone_ptr& tz,
 	const boost::posix_time::time_duration& start,	/* locale time */
 	const boost::posix_time::time_duration& end,	/* locale time */
-	__time32_t& from,				/* UTC */
-	__time32_t& till				/* UTC */
+	__time32_t* from,				/* UTC */
+	__time32_t* till				/* UTC */
 	)
 {
 	using namespace boost;
@@ -41,16 +58,16 @@ get_bin_window (
 /* start: apply provided time-of-day */
 	const local_date_time start_ldt (date, start, tz, local_date_time::NOT_DATE_TIME_ON_ERROR);
 	assert (!start_ldt.is_not_a_date_time());
-	from = (start_ldt.utc_time() - ptime (kUnixEpoch)).total_seconds();
+	*from = (start_ldt.utc_time() - ptime (kUnixEpoch)).total_seconds();
 
 /* end */
 	const local_date_time end_ldt (date, end, tz, local_date_time::NOT_DATE_TIME_ON_ERROR);
 	assert (!end_ldt.is_not_a_date_time());
-	till = (end_ldt.utc_time() - ptime (kUnixEpoch)).total_seconds();
+	*till = (end_ldt.utc_time() - ptime (kUnixEpoch)).total_seconds();
 
-	DLOG(INFO) << "converted from locale:" << to_simple_string (start)
+	DVLOG(4) << "converted from locale:" << to_simple_string (start)
 		<< " to UTC:" << to_simple_string (start_ldt.utc_time());
-	DLOG(INFO) << "converted from locale:" << to_simple_string (end)
+	DVLOG(4) << "converted from locale:" << to_simple_string (end)
 		<< " to UTC:" << to_simple_string (end_ldt.utc_time());
 }
 
@@ -61,24 +78,27 @@ get_bin_window (
  * existing values can be used to extended a previous query.
  */
 #if 1
-#include "boost/date_time/gregorian/gregorian.hpp"
 void
 gomi::get_bin (
-	std::vector<std::shared_ptr<gomi::bin_t>>& query,
-	const boost::posix_time::time_duration& start,
-	const boost::posix_time::time_duration& end,
-	const unsigned days,
-	const boost::local_time::time_zone_ptr& tz
+	const bin_t& bin,
+	std::vector<std::shared_ptr<janku_t>>& query
 	)
 {
 // BUG: FlexRecReader caches last cursor binding_set, create new reader per iteration.
 //	FlexRecReader fr;
 
-	DLOG(INFO) << "get_bin(start=" << start << " end=" << end << " days=" << days << ")";
+	DLOG(INFO) << "get_bin ("
+		"bin: { "
+			"start: " << bin.bin_start << ", "
+			"end: " << bin.bin_end << ", "
+			"tz: " << bin.bin_tz->std_zone_abbrev() << ", "
+			"day_count: " << bin.bin_day_count << " "
+		"}"
+		")";
 
 /* no-op */
-	if (query.empty() || 0 == days) {
-		DLOG(INFO) << "empty query";
+	if (query.empty() || 0 == bin.bin_day_count) {
+		DVLOG(4) << "empty query";
 		return;
 	}
 
@@ -96,14 +116,14 @@ gomi::get_bin (
 	binding.Bind (tick_volume_field.c_str(), &tick_volume);
 	binding_set.insert (binding);
 
-	DLOG(INFO) << "binding with fields: last_price=" << last_price_field << " tick_volume=" << tick_volume_field;
+	DVLOG(4) << "binding with fields: last_price=" << last_price_field << " tick_volume=" << tick_volume_field;
 
 	std::for_each (query.begin(), query.end(),
-		[&](std::shared_ptr<bin_t>& it)
+		[&](std::shared_ptr<janku_t>& it)
 	{
 		FlexRecReader fr;
 
-		DLOG(INFO) << "iteration: symbol=" << it->symbol_name;
+		DVLOG(4) << "iteration: symbol=" << it->symbol_name;
 
 /* source instruments */
 		std::set<std::string> symbol_set;
@@ -115,18 +135,32 @@ gomi::get_bin (
 		double twentyday_open_price;
 		uint64_t accumulated_volume, num_moves, day_count = 0;
 
-		using namespace boost::local_time;
-		const auto& now_in_tz = local_sec_clock::local_time (tz);
-		const auto& today_in_tz = now_in_tz.local_time().date();
-		vhayu::business_day_iterator bd_itr (today_in_tz);
+/* reset state */
+		it->clear();
 
-		for (unsigned i = 0; i < days; ++i, --bd_itr)
+/* do not assume today is a business day */
+		using namespace boost::local_time;
+		const auto& now_in_tz = local_sec_clock::local_time (bin.bin_tz);
+		const auto& today_in_tz = now_in_tz.local_time().date();
+		auto start_date (today_in_tz);
+		
+		while (!is_business_day (start_date))
+			start_date -= boost::gregorian::date_duration (1);
+
+/* save close of first business-day of analytic period */
+		const local_date_time close_ldt (start_date, bin.bin_end, bin.bin_tz, local_date_time::NOT_DATE_TIME_ON_ERROR);
+		assert (!close_ldt.is_not_a_date_time());
+		it->close_time = close_ldt.utc_time();
+		it->trading_day_count = 0;
+
+		vhayu::business_day_iterator bd_itr (start_date);
+		for (unsigned i = 0; i < bin.bin_day_count; ++i, --bd_itr)
 		{
 			__time32_t from, till;
 
-			get_bin_window (*bd_itr, tz, start, end, from, till);
+			get_bin_window (*bd_itr, bin.bin_tz, bin.bin_start, bin.bin_end, &from, &till);
 
-			DLOG(INFO) << "#" << i << " from=" << from << " till=" << till;
+			DVLOG(4) << "#" << i << " from=" << from << " till=" << till;
 
 /* reset for each day */
 			bool has_tenday = false, has_fifteenday = false, has_twentyday = false;
@@ -169,7 +203,7 @@ gomi::get_bin (
 			if (num_moves > 0)
 				++day_count;
 
-			DLOG(INFO) << "day " << to_simple_string (*bd_itr) <<
+			DVLOG(4) << "day " << to_simple_string (*bd_itr) <<
 				" acvol_1=" << day_volume << 
 				" num_moves=" << num_moves;
 
@@ -191,21 +225,25 @@ gomi::get_bin (
 		}
 
 /* finalize */
-		if (tenday_open_price > 0.0)
-			it->tenday_percentage_change     = (100.0 * (last_price - tenday_open_price)) / tenday_open_price;
-		if (fifteenday_open_price > 0.0)
-			it->fifteenday_percentage_change = (100.0 * (last_price - fifteenday_open_price)) / fifteenday_open_price;
-		if (twentyday_open_price > 0.0)
-			it->twentyday_percentage_change  = (100.0 * (last_price - twentyday_open_price)) / twentyday_open_price;
-
-		it->average_volume = accumulated_volume / days;
 		if (day_count > 0) {
-			it->average_nonzero_volume = accumulated_volume / day_count;
-LOG(INFO) << "day-count: " << day_count;
-LOG(INFO) << "total-volume: " << accumulated_volume;
+			if (tenday_open_price > 0.0)
+				it->tenday_percentage_change     = (100.0 * (last_price - tenday_open_price)) / tenday_open_price;
+			if (fifteenday_open_price > 0.0)
+				it->fifteenday_percentage_change = (100.0 * (last_price - fifteenday_open_price)) / fifteenday_open_price;
+			if (twentyday_open_price > 0.0)
+				it->twentyday_percentage_change  = (100.0 * (last_price - twentyday_open_price)) / twentyday_open_price;
+			if (accumulated_volume > 0) {
+				it->average_volume = accumulated_volume / bin.bin_day_count;
+				it->average_nonzero_volume = accumulated_volume / day_count;
+			}
 		}
 
-		DLOG(INFO) << "iteration complete,"
+/* discovered day count with trades */
+		it->trading_day_count = day_count;
+
+		DVLOG(1) << "iteration complete,"
+			" day_count=" << it->trading_day_count <<
+			" acvol=" << accumulated_volume << 
 			" avgvol=" << it->average_volume <<
 			" avgrvl=" << it->average_nonzero_volume <<	/* average real volume */
 			" count=" << it->total_moves <<
