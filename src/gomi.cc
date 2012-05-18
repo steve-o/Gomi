@@ -418,7 +418,8 @@ for (auto it = bins_.begin(); it != bins_.end(); ++it)
 	const DWORD timer_period = std::stoul (config_.interval) * 1000;
 #if 1
 	SetThreadpoolTimer (timer_.get(), &due_time, timer_period, 0);
-	LOG(INFO) << "Added periodic timer, interval " << timer_period << "ms";
+	LOG(INFO) << "Added periodic timer, interval " << timer_period << "ms"
+		", due time " << boost::posix_time::to_simple_string (boost::posix_time::from_ftime<boost::posix_time::ptime>(due_time));
 #else
 /* requires Platform SDK 7.1 */
 	typedef BOOL (WINAPI *SetWaitableTimerExProc)(
@@ -1072,6 +1073,8 @@ gomi::gomi_t::timeRefresh()
 	const ptime t0 (microsec_clock::universal_time());
 	last_activity_ = t0;
 
+	LOG(INFO) << "timeRefresh";
+
 /* Calculate affected bins */
 	bin_t bin;
 	if (!get_last_bin_close (TZ_, &bin.bin_end)) {
@@ -1080,8 +1083,10 @@ gomi::gomi_t::timeRefresh()
 	}
 
 /* prevent replay except on daylight savings */
-	if (!last_refresh_.is_not_a_date_time() && last_refresh_ == bin.bin_end)
+	if (!last_refresh_.is_not_a_date_time() && last_refresh_ == bin.bin_end) {
+LOG(INFO) << "Last bin close time same as last refresh.";
 		return false;
+	}
 
 /* constant iterator in C++11 */
 	unsigned bin_refresh_count = 0;
@@ -1093,8 +1098,10 @@ gomi::gomi_t::timeRefresh()
 		++bin_refresh_count;
 	}
 
-	if (0 == bin_refresh_count)
+	if (0 == bin_refresh_count) {
+LOG(INFO) << "No bins to re-calculate, last bin close: " << to_simple_string (bin.bin_end);
 		return false;
+	}
 
 	summaryRefresh();
 

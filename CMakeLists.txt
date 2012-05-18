@@ -6,9 +6,9 @@ cmake_minimum_required (VERSION 2.8)
 
 project (Gomi)
 
-set(GOMI_VERSION_MAJOR 0)
+set(GOMI_VERSION_MAJOR 1)
 set(GOMI_VERSION_MINOR 0)
-set(GOMI_VERSION_BUILD 1)
+set(GOMI_VERSION_BUILD 2)
 
 # Net-SNMP SDK installed, tested 5.7.1.
 set(NETSNMP_ROOT C:/usr)
@@ -100,7 +100,7 @@ add_definitions(
 # Net-SNMP Autoconf overrides
 	-DHAVE_STDINT_H
 # production release
-#	-DOFFICIAL_BUILD
+	-DOFFICIAL_BUILD
 )
 
 # SEH Exceptions

@@ -213,8 +213,8 @@ namespace gomi
 /* Configured time zone */
 		boost::local_time::time_zone_ptr TZ_;
 
-/* Parsed bin decls sorted by close time */
-		std::set<bin_t, bin_openclose_compare_t> bins_;
+/* Parsed bin decls sorted by close time, not by open-close. */
+		std::set<bin_t, bin_close_compare_t> bins_;
 
 /* last refresh time-of-day, default to not_a_date_time */
 		boost::posix_time::time_duration last_refresh_;
