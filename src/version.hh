@@ -1,12 +1,12 @@
-/* Hilo version.
+/* Gomi version.
  */
 
-#ifndef __HILO_VERSION_HH__
-#define __HILO_VERSION_HH__
+#ifndef __GOMI_VERSION_HH__
+#define __GOMI_VERSION_HH__
 
 #pragma once
 
-namespace hilo
+namespace gomi
 {
 	extern const unsigned version_major,
 		version_minor,
@@ -15,8 +15,8 @@ namespace hilo
 		*build_time,
 		*build_system,
 		*build_machine;
-} /* namespace hilo */
+} /* namespace gomi */
 
-#endif /* __HILO_VERSION_HH__ */
+#endif /* __GOMI_VERSION_HH__ */
 
 /* eof */
