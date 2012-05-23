@@ -1134,6 +1134,8 @@ gomi::gomi_t::dayRefresh()
 	const ptime t0 (microsec_clock::universal_time());
 	last_activity_ = t0;
 
+	LOG(INFO) << "dayRefresh";
+
 /* Calculate affected bins */
 	const auto now_utc = second_clock::universal_time();
 	const local_date_time now_tz (now_utc, TZ_);

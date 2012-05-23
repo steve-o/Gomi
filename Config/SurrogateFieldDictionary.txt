@@ -39,11 +39,11 @@ PCTCHG_10D "PRICE PCTCHG 10D"    3726  NULL        PRICE              17  REAL64
 !
 ! Trade Price percentage change calculation against 10th previous day
 !
-PCTCHG_15D "PRICE PCTCHG 15D"       6  NULL        PRICE              17  REAL64           7
+PCTCHG_15D "PRICE PCTCHG 15D"      10  NULL        PRICE              17  REAL64           7
 !
 ! Trade Price percentage change calculation against 15th previous day.
 !
-PCTCHG_20D "PRICE PCTCHG 20D"       7  NULL        PRICE              17  REAL64           7
+PCTCHG_20D "PRICE PCTCHG 20D"      11  NULL        PRICE              17  REAL64           7
 !
 ! Trade Price percentage change calculation against 20th previous day.
 !
@@ -107,27 +107,27 @@ LST_B_SM20 "LSTHR BIN 20D SM NM"  404  NULL        INTEGER            15  REAL64
 !
 ! 20 day bin smallest single day trade count.
 !
-OPN_B_PC10 "OPEN BIN 10D PCTCHG"    8  NULL        PRICE              17  REAL64           7
-OPN_B_PC15 "OPEN BIN 15D PCTCHG"    9  NULL        PRICE              17  REAL64           7
-OPN_B_PC20 "OPEN BIN 20D PCTCHG"   10  NULL        PRICE              17  REAL64           7
-OP2_B_PC10 "O/PRE BN 10D PCTCHG"   11  NULL        PRICE              17  REAL64           7
-OP2_B_PC15 "O/PRE BN 15D PCTCHG"   12  NULL        PRICE              17  REAL64           7
-OP2_B_PC20 "O/PRE BN 20D PCTCHG"   13  NULL        PRICE              17  REAL64           7
-CLS_B_PC10 "CLOSE BN 10D PCTCHG"   14  NULL        PRICE              17  REAL64           7
-CLS_B_PC15 "CLOSE BN 15D PCTCHG"   15  NULL        PRICE              17  REAL64           7
-CLS_B_PC20 "CLOSE BN 20D PCTCHG"   16  NULL        PRICE              17  REAL64           7
-CL2_B_PC10 "C/POST BIN 10D PC"     17  NULL        PRICE              17  REAL64           7
-CL2_B_PC15 "C/POST BIN 15D PC"     18  NULL        PRICE              17  REAL64           7
-CL2_B_PC20 "C/POST BIN 20D PC"     19  NULL        PRICE              17  REAL64           7
-1ST_B_PC10 "1ST HOUR BIN 10D PC"   20  NULL        PRICE              17  REAL64           7
-1ST_B_PC15 "1ST HOUR BIN 15D PC"   21  NULL        PRICE              17  REAL64           7
-1ST_B_PC20 "1ST HOUR BIN 20D PC"   22  NULL        PRICE              17  REAL64           7
-LST_B_PC10 "LST HOUR BIN 10D PC"   23  NULL        PRICE              17  REAL64           7
-LST_B_PC15 "LST HOUR BIN 15D PC"   24  NULL        PRICE              17  REAL64           7
-LST_B_PC20 "LST HOUR BIN 20D PC"   25  NULL        PRICE              17  REAL64           7
-10M_B_PC10 "LST 10MN BIN 10D PC"   26  NULL        PRICE              17  REAL64           7
-10M_B_PC15 "LST 10MN BIN 15D PC"   27  NULL        PRICE              17  REAL64           7
-10M_B_PC20 "LST 10MN BIN 20D PC"   34  NULL        PRICE              17  REAL64           7
+OPN_B_PC10 "OPEN BIN 10D PCTCHG"   19  NULL        PRICE              17  REAL64           7
+OPN_B_PC15 "OPEN BIN 15D PCTCHG"   21  NULL        PRICE              17  REAL64           7
+OPN_B_PC20 "OPEN BIN 20D PCTCHG"   34  NULL        PRICE              17  REAL64           7
+OP2_B_PC10 "O/PRE BN 10D PCTCHG"   35  NULL        PRICE              17  REAL64           7
+OP2_B_PC15 "O/PRE BN 15D PCTCHG"   36  NULL        PRICE              17  REAL64           7
+OP2_B_PC20 "O/PRE BN 20D PCTCHG"   47  NULL        PRICE              17  REAL64           7
+CLS_B_PC10 "CLOSE BN 10D PCTCHG"   48  NULL        PRICE              17  REAL64           7
+CLS_B_PC15 "CLOSE BN 15D PCTCHG"   50  NULL        PRICE              17  REAL64           7
+CLS_B_PC20 "CLOSE BN 20D PCTCHG"   51  NULL        PRICE              17  REAL64           7
+CL2_B_PC10 "C/POST BIN 10D PC"     56  NULL        PRICE              17  REAL64           7
+CL2_B_PC15 "C/POST BIN 15D PC"     57  NULL        PRICE              17  REAL64           7
+CL2_B_PC20 "C/POST BIN 20D PC"     59  NULL        PRICE              17  REAL64           7
+1ST_B_PC10 "1ST HOUR BIN 10D PC"   60  NULL        PRICE              17  REAL64           7
+1ST_B_PC15 "1ST HOUR BIN 15D PC"   61  NULL        PRICE              17  REAL64           7
+1ST_B_PC20 "1ST HOUR BIN 20D PC"   62  NULL        PRICE              17  REAL64           7
+LST_B_PC10 "LST HOUR BIN 10D PC"   63  NULL        PRICE              17  REAL64           7
+LST_B_PC15 "LST HOUR BIN 15D PC"   66  NULL        PRICE              17  REAL64           7
+LST_B_PC20 "LST HOUR BIN 20D PC"   69  NULL        PRICE              17  REAL64           7
+10M_B_PC10 "LST 10MN BIN 10D PC"   70  NULL        PRICE              17  REAL64           7
+10M_B_PC15 "LST 10MN BIN 15D PC"   71  NULL        PRICE              17  REAL64           7
+10M_B_PC20 "LST 10MN BIN 20D PC"   75  NULL        PRICE              17  REAL64           7
 !
 ! Trade Price percentage change for various time period bins.
 !
