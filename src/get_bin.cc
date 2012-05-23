@@ -7,6 +7,7 @@
 #include <functional>
 #include <list>
 
+/* Boost Gregorian calendar */
 #include "boost/date_time/gregorian/gregorian.hpp"
 
 /* Velocity Analytics Plugin Framework */
@@ -77,7 +78,7 @@ get_bin_window (
  * caller must reset analytic values, is_null values if clean query is required,
  * existing values can be used to extended a previous query.
  */
-#if 1
+#if 0
 void
 gomi::get_bin (
 	const bin_t& bin,
@@ -258,226 +259,193 @@ gomi::get_bin (
 	DLOG(INFO) << "get_bin() finished.";
 }
 #else
-
-namespace hilo {
+namespace gomi {
 
 	class symbol_t : boost::noncopyable
 	{
 	public:
-		symbol_t() :
-			is_null (true)
+		symbol_t (std::shared_ptr<janku_t> janku_, const boost::posix_time::ptime& close_ptime) :
+			has_close (false),
+			day_count (0),
+			janku (janku_)
 		{
+/* reset state */
+			janku->clear();
+
+/* save close of first business-day of analytic period */
+			janku->close_time = close_ptime;
 		}
 
-		symbol_t (bool is_null_) :
-			is_null (is_null_)
-		{
-		}
+		double last_price;
 
-		void set_last_value (size_t idx_, double value_) {
-			if (idx_ >= last_value.size())
-				last_value.resize (1 + idx_);
-			last_value[idx_] = value_;
-		}
+		double close_price;		bool has_close;
+		double tenday_open_price;	bool has_tenday;
+		double fifteenday_open_price;	bool has_fifteenday;
+		double twentyday_open_price;	bool has_twentyday;
+		uint64_t accumulated_volume, num_moves, day_count, day_volume;
 
-		std::forward_list<std::shared_ptr<hilo_t>> non_synthetic_list;
-/* synthetic members */
-		std::vector<double> last_value;
-		bool is_null;
-		std::list<std::pair<std::shared_ptr<symbol_t>, std::shared_ptr<hilo_t>>> as_first_leg_list, as_second_leg_list;
+		std::shared_ptr<janku_t> janku;
 	};
 
-} /* namespace hilo */
+} /* namespace gomi */
 
 void
-hilo::get_hilo (
-	std::vector<std::shared_ptr<hilo::hilo_t>>& query,
-	__time32_t	from,		/* legacy from before 2003, yay. */
-	__time32_t	till
+gomi::get_bin (
+	const bin_t& bin,
+	std::vector<std::shared_ptr<gomi::janku_t>>& query
 	)
 {
-	DLOG(INFO) << "get_hilo(from=" << from << " till=" << till << ")";
+	DLOG(INFO) << "get_bin ("
+		"bin: { "
+			"start: " << bin.bin_start << ", "
+			"end: " << bin.bin_end << ", "
+			"tz: " << bin.bin_tz->std_zone_abbrev() << ", "
+			"day_count: " << bin.bin_day_count << " "
+		"}"
+		")";
 
+/* no-op */
+	if (query.empty() || 0 == bin.bin_day_count) {
+		DVLOG(4) << "empty query";
+		return;
+	}
+
+/* prepare query data sets */
 	std::unordered_map<std::string, std::shared_ptr<symbol_t>> symbol_map;
 	std::set<std::string> symbol_set;
 	std::set<FlexRecBinding> binding_set;
-	std::unordered_map<std::string, size_t> field_map;
-	std::vector<double> fields;
+	FlexRecBinding binding (kTradeId);
+	double last_price;
+	uint64_t tick_volume;
 
-/* convert multiple queries into a single query expression */
-	std::for_each (query.begin(), query.end(),
-		[&](std::shared_ptr<hilo_t>& query_it)
-	{
-		auto symbol_it = symbol_map.find (query_it->legs.first.symbol_name);
-/* add new symbol into set */
-		if (symbol_map.end() == symbol_it) {
-			std::shared_ptr<symbol_t> new_symbol (new symbol_t (query_it->legs.first.is_null));
-			auto status = symbol_map.emplace (std::make_pair (query_it->legs.first.symbol_name, std::move (new_symbol)));
-			symbol_it = status.first;
-			symbol_set.emplace (symbol_it->first);
-		}
-
-/* map field into binding index and set last value cache */
-		auto add_field = [&](std::string& name) -> size_t {
-			auto it = field_map.find (name);
-			size_t idx;
-			if (field_map.end() == it) {
-				idx = fields.size();
-				fields.resize (idx + 1);
-				field_map[name] = idx;
-			} else {
-				idx = it->second;
-			}
-			return idx;
-		};
-
-		query_it->legs.first.bid_field_idx = add_field (query_it->legs.first.bid_field);
-		symbol_it->second->set_last_value (query_it->legs.first.bid_field_idx, query_it->legs.first.last_bid);
-
-		query_it->legs.first.ask_field_idx = add_field (query_it->legs.first.ask_field);
-		symbol_it->second->set_last_value (query_it->legs.first.ask_field_idx, query_it->legs.first.last_ask);
-
-		if (!query_it->is_synthetic) {
-			symbol_it->second->non_synthetic_list.push_front (query_it);
-			return;
-		}
-
-/* this ric is a synthetic pair, XxxYyy, add to list of Xxx a link to -Yyy and add to Yyy a link to Xxx- */
-		assert (query_it->legs.first.symbol_name != query_it->legs.second.symbol_name);
-
-/* Xxx */
-		auto first_it = std::ref (symbol_it).get();
-/* Yyy */
-		auto second_it = symbol_map.find (query_it->legs.second.symbol_name);
-		if (symbol_map.end() == second_it) {
-			std::shared_ptr<symbol_t> new_symbol (new symbol_t (query_it->legs.second.is_null));
-			auto status = symbol_map.emplace (std::make_pair (query_it->legs.second.symbol_name, std::move (new_symbol)));
-			second_it = status.first;
-			symbol_set.emplace (second_it->first);
-		}
-
-		query_it->legs.second.bid_field_idx = add_field (query_it->legs.second.bid_field);
-		second_it->second->set_last_value (query_it->legs.second.bid_field_idx, query_it->legs.second.last_bid);
-
-		query_it->legs.second.ask_field_idx = add_field (query_it->legs.second.ask_field);
-		second_it->second->set_last_value (query_it->legs.second.ask_field_idx, query_it->legs.second.last_ask);
-
-		first_it->second->as_first_leg_list.emplace_back (std::make_pair (second_it->second, query_it));
-		second_it->second->as_second_leg_list.emplace_back (std::make_pair (first_it->second, query_it));
-	});
-
-	FlexRecReader fr;
-	FlexRecBinding binding (kQuoteId);
-
-/* copy finalized bindings into new set */
-	std::for_each (field_map.begin(), field_map.end(),
-		[&](std::pair<const std::string, size_t>& field_pair)
-	{
-		binding.Bind (field_pair.first.c_str(), &fields[field_pair.second]);
-	});
+/* take fields from first query, re-use for every other query */
+	const std::string& last_price_field = query[0]->last_price_field,
+		tick_volume_field = query[0]->tick_volume_field;
+	assert (!last_price_field.empty());
+	assert (!tick_volume_field.empty());
+	binding.Bind (last_price_field.c_str(), &last_price);
+	binding.Bind (tick_volume_field.c_str(), &tick_volume);
 	binding_set.insert (binding);
 
-	auto update_non_synthetic = [&](hilo_t& query_item, std::shared_ptr<symbol_t>& symbol) {
-		const double bid_price = fields[query_item.legs.first.bid_field_idx];
-		const double ask_price = fields[query_item.legs.first.ask_field_idx];
-		if (query_item.is_null) {
-			query_item.is_null = false;
-			query_item.low  = bid_price;
-			query_item.high = ask_price;
-			DLOG(INFO) << query_item.name << " start low=" << bid_price << " high=" << ask_price;
-			return;
-		}
-		if (bid_price < query_item.low) {
-			query_item.low  = bid_price;
-			DLOG(INFO) << query_item.name << " new low=" << bid_price;
-		}
-		if (ask_price > query_item.high) {
-			query_item.high = ask_price;
-			DLOG(INFO) << query_item.name << " new high=" << ask_price;
-		}
-	};
+	DVLOG(4) << "binding with fields: last_price=" << last_price_field << " tick_volume=" << tick_volume_field;
 
-	auto update_synthetic = [&fr](hilo_t& query_item, symbol_t& first_leg, symbol_t& second_leg) {
-		if (first_leg.is_null || second_leg.is_null)
-			return;
+/* do not assume today is a business day */
+	using namespace boost::local_time;
+	const auto& now_in_tz = local_sec_clock::local_time (bin.bin_tz);
+	const auto& today_in_tz = now_in_tz.local_time().date();
+	auto start_date (today_in_tz);
+		
+	while (!is_business_day (start_date))
+		start_date -= boost::gregorian::date_duration (1);
 
-/* lambda to function pointer is incomplete in MSVC2010, punt to the compiler to clean up. */
-		auto math_func = [&query_item](double a, double b) -> double {
-			if (MATH_OP_TIMES == query_item.math_op)
-				return (double)(a * b);
-			else if (b == 0.0)
-				return b;
-			else
-				return (double)(a / b);
-		};
+/* save close of first business-day of analytic period */
+	const local_date_time close_ldt (start_date, bin.bin_end, bin.bin_tz, local_date_time::NOT_DATE_TIME_ON_ERROR);
+	assert (!close_ldt.is_not_a_date_time());
 
-		const double synthetic_bid_price = math_func (first_leg.last_value[query_item.legs.first.bid_field_idx], second_leg.last_value[query_item.legs.second.bid_field_idx]);
-		const double synthetic_ask_price = math_func (first_leg.last_value[query_item.legs.first.ask_field_idx], second_leg.last_value[query_item.legs.second.ask_field_idx]);
-
-		if (query_item.is_null) {
-			query_item.is_null = false;
-			query_item.low  = synthetic_bid_price;
-			query_item.high = synthetic_ask_price;
-			DLOG(INFO) << "Start low=" << synthetic_bid_price << " high=" << synthetic_ask_price;
-			return;
-		}
-
-		if (synthetic_bid_price < query_item.low) {
-			query_item.low  = synthetic_bid_price;
-			DLOG(INFO) << "New low=" << query_item.low;
-		}
-		if (synthetic_ask_price > query_item.high) {
-			query_item.high = synthetic_ask_price;
-			DLOG(INFO) << "New high=" << query_item.high;
-		}
-	};
-
-/* run one single big query */
-	fr.Open (symbol_set, binding_set, from, till, 0 /* forward */, 0 /* no limit */);
-	while (fr.Next()) {
-		auto symbol = symbol_map[fr.GetCurrentSymbolName()];
-/* non-synthetic */
-		std::for_each (symbol->non_synthetic_list.begin(), symbol->non_synthetic_list.end(),
-			[&](std::shared_ptr<hilo_t>& query_it)
-		{
-			update_non_synthetic (*query_it.get(), symbol);
-		});
-/* synthetics */
-		symbol->is_null = false;
-/* cache last value */
-		for (int i = fields.size() - 1; i >= 0; i--)
-			symbol->last_value[i] = fields[i];
-		std::for_each (symbol->as_first_leg_list.begin(), symbol->as_first_leg_list.end(),
-			[&](std::pair<std::shared_ptr<symbol_t>, std::shared_ptr<hilo_t>> second_leg)
-		{
-			update_synthetic (*second_leg.second.get(), *symbol.get(), *second_leg.first.get());
-		});
-		std::for_each (symbol->as_second_leg_list.begin(), symbol->as_second_leg_list.end(),
-			[&](std::pair<std::shared_ptr<symbol_t>, std::shared_ptr<hilo_t>> first_leg)
-		{
-			update_synthetic (*first_leg.second.get(), *first_leg.first.get(), *symbol.get());
-		});
-	}	
-	fr.Close();
-
-/* cache symbol last values back into query vector, 1:M operation */
-	std::for_each (query.begin(), query.end(),
-		[&](std::shared_ptr<hilo_t>& query_it)
+/* convert multiple queries into a single query expression */
+	std::for_each (query.begin(), query.end(), [&symbol_set, &symbol_map, &close_ldt](std::shared_ptr<janku_t>& it)
 	{
-		auto first_leg = symbol_map[query_it->legs.first.symbol_name];
-		query_it->legs.first.is_null  = first_leg->is_null;
-		query_it->legs.first.last_bid = first_leg->last_value[query_it->legs.first.bid_field_idx];
-		query_it->legs.first.last_ask = first_leg->last_value[query_it->legs.first.ask_field_idx];
-
-		if (!query_it->is_synthetic) return;
-
-		auto second_leg = symbol_map[query_it->legs.second.symbol_name];
-		query_it->legs.second.is_null  = second_leg->is_null;
-		query_it->legs.second.last_bid = second_leg->last_value[query_it->legs.second.bid_field_idx];
-		query_it->legs.second.last_ask = second_leg->last_value[query_it->legs.second.ask_field_idx];
+		auto new_symbol = std::make_shared<symbol_t> (it, close_ldt.utc_time());
+		auto status = symbol_map.emplace (std::make_pair (it->symbol_name, std::move (new_symbol)));
+		symbol_set.emplace (status.first->first);
 	});
 
-	DLOG(INFO) << "get_hilo() finished.";
+/* run one single big query for each day*/
+	vhayu::business_day_iterator bd_itr (start_date);
+	for (unsigned i = 0; i < bin.bin_day_count; ++i, --bd_itr)
+	{
+		__time32_t from, till;
+		get_bin_window (*bd_itr, bin.bin_tz, bin.bin_start, bin.bin_end, &from, &till);
+
+		DVLOG(4) << "#" << i << " from=" << from << " till=" << till;
+
+/* reset for each day */
+		std::for_each (symbol_map.begin(), symbol_map.end(), [](std::pair<const std::string, std::shared_ptr<symbol_t>>& it)
+		{
+			auto symbol = it.second.get();
+			symbol->has_tenday = symbol->has_fifteenday = symbol->has_twentyday = false;
+			symbol->day_volume = symbol->num_moves = 0;
+		});
+
+		FlexRecReader fr;
+		fr.Open (symbol_set, binding_set, from, till, 0 /* forward */, 0 /* no limit */);
+		while (fr.Next()) {
+			auto symbol = symbol_map[fr.GetCurrentSymbolName()];
+/* first trade */
+			if (0 == symbol->num_moves) {
+				if (!symbol->has_twentyday && i < 20) {
+					symbol->twentyday_open_price = last_price;
+					symbol->has_twentyday = true;
+				}
+				if (!symbol->has_fifteenday && i < 15) {
+					symbol->fifteenday_open_price = last_price;
+					symbol->has_fifteenday = true;
+				}
+				if (!symbol->has_tenday && i < 10) {
+					symbol->tenday_open_price = last_price;
+					symbol->has_tenday = true;
+				}
+			}
+			symbol->last_price = last_price;
+			symbol->day_volume += tick_volume;
+			++(symbol->num_moves);
+		}	
+		fr.Close();
+
+/* close of day */
+		std::for_each (symbol_map.begin(), symbol_map.end(), [](std::pair<const std::string, std::shared_ptr<symbol_t>>& it)
+		{
+			auto symbol = it.second.get();
+/* test for closing price */
+			if (!symbol->has_close && symbol->num_moves > 0) {
+				symbol->close_price = symbol->last_price;
+				symbol->has_close = true;
+			}
+
+/* test for zero-trade day */
+			if (symbol->num_moves > 0)
+				++symbol->day_count;
+
+			symbol->janku->total_moves += symbol->num_moves;
+			symbol->accumulated_volume += symbol->day_volume;
+			if (symbol->janku->is_null) {
+				symbol->janku->is_null = false;
+/* sets smallest-moves to zero */
+				symbol->janku->maximum_moves = symbol->janku->minimum_moves = symbol->janku->smallest_moves = symbol->num_moves;
+			} else {
+				if (symbol->num_moves > 0) {
+/* edge case: smallest-moves should not be zero if a trade-day is available */
+					if (0 == symbol->janku->maximum_moves) symbol->janku->smallest_moves = symbol->num_moves;
+					else if (symbol->num_moves < symbol->janku->smallest_moves) symbol->janku->smallest_moves = symbol->num_moves;
+					if (symbol->num_moves > symbol->janku->maximum_moves) symbol->janku->maximum_moves = symbol->num_moves;
+				}
+				if (symbol->num_moves < symbol->janku->minimum_moves) symbol->janku->minimum_moves = symbol->num_moves;
+			}
+		});
+	}
+
+/* finalize */
+	std::for_each (symbol_map.begin(), symbol_map.end(), [&bin](std::pair<const std::string, std::shared_ptr<symbol_t>>& it)
+	{
+		auto symbol = it.second.get();
+		if (symbol->day_count > 0) {
+			if (symbol->tenday_open_price > 0.0)
+				symbol->janku->tenday_percentage_change     = (100.0 * (symbol->last_price - symbol->tenday_open_price)) / symbol->tenday_open_price;
+			if (symbol->fifteenday_open_price > 0.0)
+				symbol->janku->fifteenday_percentage_change = (100.0 * (symbol->last_price - symbol->fifteenday_open_price)) / symbol->fifteenday_open_price;
+			if (symbol->twentyday_open_price > 0.0)
+				symbol->janku->twentyday_percentage_change  = (100.0 * (symbol->last_price - symbol->twentyday_open_price)) / symbol->twentyday_open_price;
+			if (symbol->accumulated_volume > 0) {
+				symbol->janku->average_volume = symbol->accumulated_volume / bin.bin_day_count;
+				symbol->janku->average_nonzero_volume = symbol->accumulated_volume / symbol->day_count;
+			}
+		}
+
+/* discovered day count with trades */
+		symbol->janku->trading_day_count = symbol->day_count;
+	});
+
+	DLOG(INFO) << "get_bin() finished.";
 }
 #endif
 
