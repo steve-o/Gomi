@@ -47,6 +47,7 @@ static const char* kGomiFlexRecordName = "Gomi";
 static const char* kBasicFunctionName = "gomi_query";
 static const char* kFeedLogFunctionName = "gomi_feedlog";
 static const char* kRepublishFunctionName = "gomi_republish";
+static const char* kLastBinFunctionName = "gomi_last_bin";
 
 /* Default FlexRecord fields. */
 static const char* kDefaultLastPriceField = "LastPrice";
@@ -413,6 +414,8 @@ for (auto it = bins_.begin(); it != bins_.end(); ++it)
 	LOG(INFO) << "Registered Tcl API \"" << kFeedLogFunctionName << "\"";
 	registerCommand (getId(), kRepublishFunctionName);
 	LOG(INFO) << "Registered Tcl API \"" << kRepublishFunctionName << "\"";
+	registerCommand (getId(), kLastBinFunctionName);
+	LOG(INFO) << "Registered Tcl API \"" << kLastBinFunctionName << "\"";
 
 /* Timer for periodic publishing.
  */
@@ -506,6 +509,8 @@ gomi::gomi_t::destroy()
 {
 	LOG(INFO) << "Closing instance.";
 /* Unregister Tcl API. */
+	deregisterCommand (getId(), kLastBinFunctionName);
+	LOG(INFO) << "Unregistered Tcl API \"" << kLastBinFunctionName << "\"";
 	deregisterCommand (getId(), kRepublishFunctionName);
 	LOG(INFO) << "Unregistered Tcl API \"" << kRepublishFunctionName << "\"";
 	deregisterCommand (getId(), kFeedLogFunctionName);
@@ -571,6 +576,8 @@ gomi::gomi_t::execute (
 			retval = tclFeedLogQuery (cmdInfo, cmdData);
 		else if (0 == strcmp (command, kRepublishFunctionName))
 			retval = tclRepublishQuery (cmdInfo, cmdData);
+		else if (0 == strcmp (command, kLastBinFunctionName))
+			retval = tclRepublishLastBinQuery (cmdInfo, cmdData);
 		else
 			Tcl_SetResult (interp, "unknown function", TCL_STATIC);
 	}
@@ -965,6 +972,37 @@ gomi::gomi_t::tclRepublishQuery (
 	return TCL_OK;
 }
 
+/* gomi_last_bin
+ */
+int
+gomi::gomi_t::tclRepublishLastBinQuery (
+	const vpf::CommandInfo& cmdInfo,
+	vpf::TCLCommandData& cmdData
+	)
+{
+	TCLLibPtrs* tclStubsPtr = (TCLLibPtrs*)cmdData.mClientData;
+	Tcl_Interp* interp = cmdData.mInterp;		/* Current interpreter. */
+/* Refresh already running.  Note locking is handled outside query to enable
+ * feedback to Tcl interface.
+ */
+	boost::unique_lock<boost::shared_mutex> lock (query_mutex_, boost::try_to_lock_t());
+	if (!lock.owns_lock()) {
+		Tcl_SetResult (interp, "query already running", TCL_STATIC);
+		return TCL_ERROR;
+	}
+
+	try {
+		last_refresh_ = boost::posix_time::not_a_date_time;
+		timeRefresh();
+	} catch (rfa::common::InvalidUsageException& e) {
+		LOG(ERROR) << "InvalidUsageException: { "
+			"Severity: \"" << severity_string (e.getSeverity()) << "\""
+			", Classification: \"" << classification_string (e.getClassification()) << "\""
+			", StatusText: \"" << e.getStatus().getStatusText() << "\" }";
+	}
+	return TCL_OK;
+}
+
 /* callback from periodic timer.
  */
 void
@@ -1181,7 +1219,7 @@ gomi::gomi_t::binRefresh (
 	bin.bin_tz = TZ_;
 	bin.bin_day_count = std::stoi (config_.day_count);
 
-	DLOG(INFO) << "binRefresh ("
+	LOG(INFO) << "binRefresh ("
 		"bin: { "
 			"name: " << bin.bin_name << ", "
 			"start: " << bin.bin_start << ", "
@@ -1389,6 +1427,8 @@ gomi::gomi_t::summaryRefresh ()
 /* no analytics found */
 	if (close_time.is_neg_infinity())
 		return false;
+
+	LOG(INFO) << "summary timestamp: " << to_simple_string (close_time);
 
 /* 7.5.9.1 Create a response message (4.2.2) */
 	rfa::message::RespMsg response (false);	/* reference */

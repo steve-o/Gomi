@@ -168,7 +168,18 @@ gomi::get_bin (
 			uint64_t day_volume = 0;
 			num_moves = 0;
 
-			fr.Open (symbol_set, binding_set, from, till, 0 /* forward */, 0 /* no limit */);
+			try {
+				char error_text[1024];
+				const int cursor_status = fr.Open (symbol_set, binding_set, from, till, 0 /* forward */, 0 /* no limit */, error_text);
+				if (1 != cursor_status) {
+					LOG(ERROR) << "FlexRecReader::Open failed { \"code\": " << cursor_status
+						<< ", \"text\": \"" << error_text << "\" }";
+					continue;
+				}
+			} catch (std::exception& e) {
+				LOG(ERROR) << "FlexRecReader::Open raised exception " << e.what();
+				continue;
+			}
 			if (fr.Next())
 			{
 /* first trade */
@@ -295,6 +306,8 @@ gomi::get_bin (
 	std::vector<std::shared_ptr<gomi::janku_t>>& query
 	)
 {
+	using namespace boost::posix_time;
+
 	DLOG(INFO) << "get_bin ("
 		"bin: { "
 			"start: " << bin.bin_start << ", "
@@ -309,6 +322,9 @@ gomi::get_bin (
 		DVLOG(4) << "empty query";
 		return;
 	}
+
+// BUG: FlexRecReader caches last cursor binding_set, create new reader per iteration if different binding is required.
+	FlexRecReader fr;
 
 /* prepare query data sets */
 	std::unordered_map<std::string, std::shared_ptr<symbol_t>> symbol_map;
@@ -354,6 +370,7 @@ gomi::get_bin (
 	vhayu::business_day_iterator bd_itr (start_date);
 	for (unsigned i = 0; i < bin.bin_day_count; ++i, --bd_itr)
 	{
+const ptime t0 (microsec_clock::universal_time());
 		__time32_t from, till;
 		get_bin_window (*bd_itr, bin.bin_tz, bin.bin_start, bin.bin_end, &from, &till);
 
@@ -367,8 +384,28 @@ gomi::get_bin (
 			symbol->day_volume = symbol->num_moves = 0;
 		});
 
-		FlexRecReader fr;
-		fr.Open (symbol_set, binding_set, from, till, 0 /* forward */, 0 /* no limit */);
+const ptime t1 (microsec_clock::universal_time());
+//		FlexRecReader fr;
+/*
+LOG(INFO) << "symbol_set: " << symbol_set.size()
+	<< ", binding_set: " << binding_set.size()
+	<< ", from: " << from
+	<< ", till: " << till;
+	*/
+		try {
+			char error_text[1024];
+			const int cursor_status = fr.Open (symbol_set, binding_set, from, till, 0 /* forward */, 0 /* no limit */, error_text);
+			if (1 != cursor_status) {
+				LOG(ERROR) << "FlexRecReader::Open failed { \"code\": " << cursor_status
+					<< ", \"text\": \"" << error_text << "\" }";
+				continue;
+			}
+		} catch (std::exception& e) {
+			LOG(ERROR) << "FlexRecReader::Open raised exception " << e.what();
+			continue;
+		}
+const ptime t2 (microsec_clock::universal_time());
+#if 1
 		while (fr.Next()) {
 			auto symbol = symbol_map[fr.GetCurrentSymbolName()];
 /* first trade */
@@ -389,8 +426,11 @@ gomi::get_bin (
 			symbol->last_price = last_price;
 			symbol->day_volume += tick_volume;
 			++(symbol->num_moves);
-		}	
+		}
+#endif
+const ptime t3 (microsec_clock::universal_time());
 		fr.Close();
+const ptime t4 (microsec_clock::universal_time());
 
 /* close of day */
 		std::for_each (symbol_map.begin(), symbol_map.end(), [](std::pair<const std::string, std::shared_ptr<symbol_t>>& it)
@@ -422,6 +462,12 @@ gomi::get_bin (
 				if (symbol->num_moves < symbol->janku->minimum_moves) symbol->janku->minimum_moves = symbol->num_moves;
 			}
 		});
+const ptime t5 (microsec_clock::universal_time());
+LOG(INFO) << "timing: t0-t1=" << (t1-t0).total_milliseconds() << "ms"
+	            " t1-t2=" << (t2-t1).total_milliseconds() << "ms"
+	            " t2-t3=" << (t3-t2).total_milliseconds() << "ms"
+	            " t3-t4=" << (t4-t3).total_milliseconds() << "ms"
+	            " t4-t5=" << (t5-t4).total_milliseconds() << "ms";
 	}
 
 /* finalize */
