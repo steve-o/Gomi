@@ -78,9 +78,17 @@ get_bin_window (
  * caller must reset analytic values, is_null values if clean query is required,
  * existing values can be used to extended a previous query.
  */
-#if 0
+
+/* Flex Record Cursor API reference implementation.
+ *
+ * slow.
+ */
+
+namespace gomi {
+namespace reference {
+
 void
-gomi::get_bin (
+get_bin (
 	const bin_t& bin,
 	std::vector<std::shared_ptr<janku_t>>& query
 	)
@@ -269,8 +277,233 @@ gomi::get_bin (
 
 	DLOG(INFO) << "get_bin() finished.";
 }
-#else
+
+} // namespace reference
+} // namespace gomi
+
+/* Flex Record Primitive API version.
+ *
+ * Faster API that sits underneath documented cursor API.
+ */
+
 namespace gomi {
+namespace primitive {
+
+static
+int
+on_flexrecord (
+	FRTreeCallbackInfo* info
+	)
+{
+	if (nullptr == info->callersData) {
+		LOG(ERROR) << "Invalid closure on FlexRecordTreeCallback";
+		return 2;
+	}
+	gomi::analytic_state_t* state = static_cast<gomi::analytic_state_t*> (info->callersData);
+	const VarFieldsView* view = info->theView;
+
+	const double last_price    =   *(const double*)view[kFRFixedFields +  0].data;
+	const uint64_t tick_volume = *(const uint64_t*)view[kFRFixedFields + 19].data;
+
+	if (0 == state->num_moves)
+		state->open_price = last_price;
+	state->accumulated_volume += tick_volume;
+	++(state->num_moves);
+	state->close_price = last_price;
+
+	return 1;
+}
+
+void
+get_bin (
+	const bin_t& bin,
+	std::vector<std::shared_ptr<janku_t>>& query,
+	FlexRecWorkAreaElement* work_area,
+	FlexRecViewElement* view_element
+	)
+{
+	DLOG(INFO) << "get_bin ("
+		"bin: { "
+			"start: " << bin.bin_start << ", "
+			"end: " << bin.bin_end << ", "
+			"tz: " << bin.bin_tz->std_zone_abbrev() << ", "
+			"day_count: " << bin.bin_day_count << " "
+		"}"
+		")";
+
+/* no-op */
+	if (query.empty() || 0 == bin.bin_day_count) {
+		DVLOG(4) << "empty query";
+		return;
+	}
+
+/* do not assume today is a business day */
+	using namespace boost::local_time;
+	auto now_in_tz = local_sec_clock::local_time (bin.bin_tz);
+
+/* verify bin is not in the future */
+	if (now_in_tz.local_time().time_of_day() < bin.bin_end) {
+		LOG(WARNING) << "bin in future, adjusting to recalculate yesterdays analytic.";
+		now_in_tz -= boost::gregorian::days (1);
+	}
+
+	const auto today_in_tz = now_in_tz.local_time().date();
+	auto start_date (today_in_tz);
+	const local_date_time close_ldt (start_date, bin.bin_end, bin.bin_tz, local_date_time::NOT_DATE_TIME_ON_ERROR);
+	assert (!close_ldt.is_not_a_date_time());
+	while (!is_business_day (start_date))
+		start_date -= boost::gregorian::date_duration (1);
+	vhayu::business_day_iterator bd_it (start_date);
+
+/* pre-iterate days due to slow API */
+	std::vector<boost::gregorian::date> business_days (bin.bin_day_count);
+	for (unsigned i = 0; i < bin.bin_day_count; ++i, --bd_it)
+		business_days[i] = *bd_it;
+
+	std::for_each (query.begin(), query.end(),
+		[&](std::shared_ptr<janku_t>& it)
+	{
+		DVLOG(4) << "iteration: symbol=" << it->symbol_name;
+
+		if (nullptr == it->handle) {
+			LOG(WARNING) << "Skipping invalid symbol pointer.";
+			return;
+		}
+
+		double tenday_open_price, fifteenday_open_price, twentyday_open_price;
+		uint64_t accumulated_volume, num_moves, day_count = 0;
+
+/* reset state */
+		it->clear();
+
+/* save close of first business-day of analytic period */
+		it->close_time = close_ldt.utc_time();
+
+/* keep state pointer to open closing price */
+		auto state_it = it->analytic_state.begin();
+		if (it->analytic_state.end() == state_it) {
+/* clean cache */
+			it->analytic_state.resize (bin.bin_day_count);
+			state_it = it->analytic_state.begin();
+		} else if (!state_it->is_null) {
+/* potential cached state */
+			__time32_t from, till;
+			get_bin_window (business_days[0], bin.bin_tz, bin.bin_start, bin.bin_end, &from, &till);
+			if (till != state_it->close_time) {
+/* first days iteration, otherwise overwrite */
+				it->analytic_state.pop_back();
+				analytic_state_t empty;
+				it->analytic_state.push_front (empty);
+			}
+		} else {
+/* overwrite */
+		}
+
+		for (unsigned i = 0; i < bin.bin_day_count; ++i, ++state_it)
+		{
+			__time32_t from, till;
+			get_bin_window (business_days[i], bin.bin_tz, bin.bin_start, bin.bin_end, &from, &till);
+			DVLOG(4) << "#" << i << " from=" << from << " till=" << till;
+
+			if (!state_it->open (till))
+			{
+				try {
+					char error_text[1024];
+					U64 numRecs = FlexRecPrimitives::GetFlexRecords (
+						it->handle, 
+						"Trade",
+						from, till, 0 /* forward */,
+						0 /* no limit */,
+						view_element->view,
+						work_area->data,
+						on_flexrecord,
+						&(*state_it) /* closure */
+					);
+				} catch (std::exception& e) {
+					LOG(ERROR) << "FlexRecPrimitives::GetFlexRecords raised exception " << e.what();
+					continue;
+				}
+			}
+
+			if (state_it->num_moves > 0) {
+/* first trade */
+				if (i < 20)
+					twentyday_open_price = state_it->open_price;
+				if (i < 15)
+					fifteenday_open_price = state_it->open_price;
+				if (i < 10)
+					tenday_open_price = state_it->open_price;
+/* non-zero-trade day count */
+				++day_count;
+				it->total_moves    += state_it->num_moves;
+				accumulated_volume += state_it->accumulated_volume;
+			}
+
+			DVLOG(4) << "day " << to_simple_string (business_days[i]) <<
+				" acvol_1=" << state_it->accumulated_volume << 
+				" num_moves=" << state_it->num_moves;
+
+/* first analytic result */
+			if (it->is_null) {
+				it->is_null = false;
+/* sets smallest-moves to zero */
+				it->maximum_moves = it->minimum_moves = it->smallest_moves = state_it->num_moves;
+			} else {
+				if (state_it->num_moves > 0) {
+/* edge case: smallest-moves should not be zero if a trade-day is available */
+					if (0 == it->maximum_moves) it->smallest_moves = state_it->num_moves;
+					else if (state_it->num_moves < it->smallest_moves) it->smallest_moves = state_it->num_moves;
+					if (state_it->num_moves > it->maximum_moves) it->maximum_moves = state_it->num_moves;
+				}
+				if (state_it->num_moves < it->minimum_moves) it->minimum_moves = state_it->num_moves;
+			}
+		}
+
+/* finalize */
+		if (day_count > 0) {
+			if (tenday_open_price > 0.0)
+				it->tenday_percentage_change     = (100.0 * (state_it->close_price - tenday_open_price)) / tenday_open_price;
+			if (fifteenday_open_price > 0.0)
+				it->fifteenday_percentage_change = (100.0 * (state_it->close_price - fifteenday_open_price)) / fifteenday_open_price;
+			if (twentyday_open_price > 0.0)
+				it->twentyday_percentage_change  = (100.0 * (state_it->close_price - twentyday_open_price)) / twentyday_open_price;
+			if (accumulated_volume > 0) {
+				it->average_volume = accumulated_volume / bin.bin_day_count;
+				it->average_nonzero_volume = accumulated_volume / day_count;
+			}
+/* discovered day count with trades */
+			it->trading_day_count = day_count;
+		}
+
+		DVLOG(1) << "iteration complete,"
+			" day_count=" << it->trading_day_count <<
+			" acvol=" << accumulated_volume << 
+			" avgvol=" << it->average_volume <<
+			" avgrvl=" << it->average_nonzero_volume <<	/* average real volume */
+			" count=" << it->total_moves <<
+			" hicnt=" << it->maximum_moves <<
+			" locnt=" << it->minimum_moves <<
+			" smcnt=" << it->smallest_moves <<
+			" pctchg_10d=" << it->tenday_percentage_change <<
+			" pctchg_15d=" << it->fifteenday_percentage_change <<
+			" pctchg_20d=" << it->twentyday_percentage_change;
+	});
+
+	DLOG(INFO) << "get_bin() finished.";
+}
+
+} // namespace primitive
+} // namespace gomi
+
+
+/* single iterator implementation.
+ *
+ * incorrectly assumes cursor walks single timeline of datastore.  iterate once through timeline picking
+ * up all trades as and when they occur.
+ */
+
+namespace gomi {
+namespace single_iterator {
 
 	class symbol_t : boost::noncopyable
 	{
@@ -298,12 +531,10 @@ namespace gomi {
 		std::shared_ptr<janku_t> janku;
 	};
 
-} /* namespace gomi */
-
 void
-gomi::get_bin (
+get_bin (
 	const bin_t& bin,
-	std::vector<std::shared_ptr<gomi::janku_t>>& query
+	std::vector<std::shared_ptr<janku_t>>& query
 	)
 {
 	using namespace boost::posix_time;
@@ -493,6 +724,8 @@ LOG(INFO) << "timing: t0-t1=" << (t1-t0).total_milliseconds() << "ms"
 
 	DLOG(INFO) << "get_bin() finished.";
 }
-#endif
+
+} // namespace single_iterator
+} // namespace gomi
 
 /* eof */

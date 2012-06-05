@@ -153,6 +153,7 @@ namespace gomi
 		int tclFeedLogQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 		int tclRepublishQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 		int tclRepublishLastBinQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
+		int tclRecalculateQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 
 		bool is_special_bin (const bin_t& bin);
 
@@ -162,6 +163,7 @@ namespace gomi
 /* Broadcast out messages. */
 		bool timeRefresh() throw (rfa::common::InvalidUsageException);
 		bool dayRefresh() throw (rfa::common::InvalidUsageException);
+		bool Recalculate() throw (rfa::common::InvalidUsageException);
 		bool binRefresh (const bin_t& bin) throw (rfa::common::InvalidUsageException);
 		bool summaryRefresh() throw (rfa::common::InvalidUsageException);
 
@@ -177,6 +179,11 @@ namespace gomi
 
 /* Significant failure has occurred, so ignore all runtime events flag. */
 		bool is_shutdown_;
+
+/* FLexRecord cursor */
+		FlexRecDefinitionManager* manager_;
+		std::shared_ptr<FlexRecWorkAreaElement> work_area_;
+		std::shared_ptr<FlexRecViewElement> view_element_;
 
 /* SNMP implant. */
 		std::unique_ptr<snmp_agent_t> snmp_agent_;

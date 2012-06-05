@@ -47,7 +47,8 @@ static const char* kGomiFlexRecordName = "Gomi";
 static const char* kBasicFunctionName = "gomi_query";
 static const char* kFeedLogFunctionName = "gomi_feedlog";
 static const char* kRepublishFunctionName = "gomi_republish";
-static const char* kLastBinFunctionName = "gomi_last_bin";
+static const char* kRepublishLastBinFunctionName = "gomi_republish_last_bin";
+static const char* kRecalculateFunctionName = "gomi_recalculate";
 
 /* Default FlexRecord fields. */
 static const char* kDefaultLastPriceField = "LastPrice";
@@ -168,6 +169,7 @@ ReadSymbolMap (
 
 gomi::gomi_t::gomi_t() :
 	is_shutdown_ (false),
+	manager_ (nullptr),
 	last_refresh_ (boost::posix_time::not_a_date_time),
 	last_activity_ (boost::posix_time::microsec_clock::universal_time()),
 	min_tcl_time_ (boost::posix_time::pos_infin),
@@ -238,6 +240,16 @@ gomi::gomi_t::init (
 
 	LOG(INFO) << config_;
 
+/* FlexRecord cursor */
+	manager_ = FlexRecDefinitionManager::GetInstance (nullptr);
+	work_area_.reset (manager_->AcquireWorkArea(), [this](FlexRecWorkAreaElement* work_area){ manager_->ReleaseWorkArea (work_area); });
+	view_element_.reset (manager_->AcquireView(), [this](FlexRecViewElement* view_element){ manager_->ReleaseView (view_element); });
+
+	if (!manager_->GetView ("Trade", view_element_->view)) {
+		LOG(ERROR) << "FlexRecDefinitionManager::GetView failed";
+		goto cleanup;
+	}
+
 /* Boost time zone database. */
 	try {
 		tzdb_.load_from_file (config_.tzdb);
@@ -283,7 +295,8 @@ gomi::gomi_t::init (
 
 /* RFA asynchronous event queue. */
 		const RFA_String eventQueueName (config_.event_queue_name.c_str(), 0, false);
-		event_queue_.reset (rfa::common::EventQueue::create (eventQueueName), std::mem_fun (&rfa::common::EventQueue::destroy));
+/* translation: event_queue_.destroy() */
+		event_queue_.reset (rfa::common::EventQueue::create (eventQueueName), std::mem_fn (&rfa::common::EventQueue::destroy));
 		if (!(bool)event_queue_)
 			goto cleanup;
 
@@ -414,8 +427,10 @@ for (auto it = bins_.begin(); it != bins_.end(); ++it)
 	LOG(INFO) << "Registered Tcl API \"" << kFeedLogFunctionName << "\"";
 	registerCommand (getId(), kRepublishFunctionName);
 	LOG(INFO) << "Registered Tcl API \"" << kRepublishFunctionName << "\"";
-	registerCommand (getId(), kLastBinFunctionName);
-	LOG(INFO) << "Registered Tcl API \"" << kLastBinFunctionName << "\"";
+	registerCommand (getId(), kRepublishLastBinFunctionName);
+	LOG(INFO) << "Registered Tcl API \"" << kRepublishLastBinFunctionName << "\"";
+	registerCommand (getId(), kRecalculateFunctionName);
+	LOG(INFO) << "Registered Tcl API \"" << kRecalculateFunctionName << "\"";
 
 /* Timer for periodic publishing.
  */
@@ -425,11 +440,7 @@ for (auto it = bins_.begin(); it != bins_.end(); ++it)
 		goto cleanup;
 	}
 	const DWORD timer_period = std::stoul (config_.interval) * 1000;
-#if 1
-	SetThreadpoolTimer (timer_.get(), &due_time, timer_period, 0);
-	LOG(INFO) << "Added periodic timer, interval " << timer_period << "ms"
-		", due time " << boost::posix_time::to_simple_string (boost::posix_time::from_ftime<boost::posix_time::ptime>(due_time));
-#else
+#if _WIN32_WINNT >= _WIN32_WINNT_WIN7
 /* requires Platform SDK 7.1 */
 	typedef BOOL (WINAPI *SetWaitableTimerExProc)(
 		__in  HANDLE hTimer,
@@ -441,23 +452,36 @@ for (auto it = bins_.begin(); it != bins_.end(); ++it)
 		__in  ULONG TolerableDelay
 	);
 	SetWaitableTimerExProc pFnSetWaitableTimerEx = nullptr;
-	ULONG tolerance = std::stoul (config_.tolerable_delay);
-	REASON_CONTEXT reasonContext = {0};
-	reasonContext.Version = 0;
-	reasonContext.Flags = POWER_REQUEST_CONTEXT_SIMPLE_STRING;
-	reasonContext.Reason.SimpleReasonString = L"GomiTimer";
 	HMODULE hKernel32Module = GetModuleHandle (_T("kernel32.dll"));
-	BOOL timer_status = false;
 	if (nullptr != hKernel32Module)
 		pFnSetWaitableTimerEx = (SetWaitableTimerExProc) ::GetProcAddress (hKernel32Module, "SetWaitableTimerEx");
-	if (nullptr != pFnSetWaitableTimerEx)
-		timer_status = pFnSetWaitableTimerEx (timer_.get(), &due_time, timer_period, nullptr, nullptr, &reasonContext, tolerance);
-	if (timer_status) {
-		LOG(INFO) << "Added periodic timer, interval " << timer_period << "ms, tolerance " << tolerance << "ms";
-	} else {
-		SetThreadpoolTimer (timer_.get(), &due_time, timer_period, 0);
-		LOG(INFO) << "Added periodic timer, interval " << timer_period << "ms";
+	if (nullptr != pFnSetWaitableTimerEx) {
+		LARGE_INTEGER DueTime;
+		DueTime.LowPart = due_time.dwLowDateTIme;
+		DueTime.HighPart = due_time.dwHighDateTIme;
+		REASON_CONTEXT reasonContext = {0};
+		reasonContext.Version = 0;
+		reasonContext.Flags = POWER_REQUEST_CONTEXT_SIMPLE_STRING;
+		reasonContext.Reason.SimpleReasonString = L"GomiTimer";
+		ULONG tolerance = std::stoul (config_.tolerable_delay);
+		BOOL timer_status = pFnSetWaitableTimerEx (timer_.get(), &DueTime, timer_period, nullptr, nullptr, &reasonContext, tolerance);
+		if (timer_status) {
+			LOG(INFO) << "Added periodic timer, interval " << timer_period << "ms, tolerance " << tolerance << "ms"
+				", due time " << boost::posix_time::to_simple_string (boost::posix_time::from_ftime<boost::posix_time::ptime>(due_time));
+		} else {
+			LOG(ERROR) << "SetWaitableTimerEx failed, reverting to SetThreadpoolTimer.";
+			pFnSetWaitableTimerEx = nullptr;
+		}
 	}
+	if (nullptr != pFnSetWaitableTimerEx) {
+		SetThreadpoolTimer (timer_.get(), &due_time, timer_period, 0);
+		LOG(INFO) << "Added periodic timer, interval " << timer_period << "ms"
+			", due time " << boost::posix_time::to_simple_string (boost::posix_time::from_ftime<boost::posix_time::ptime>(due_time));
+	}
+#else
+	SetThreadpoolTimer (timer_.get(), &due_time, timer_period, 0);
+	LOG(INFO) << "Added periodic timer, interval " << timer_period << "ms"
+		", due time " << boost::posix_time::to_simple_string (boost::posix_time::from_ftime<boost::posix_time::ptime>(due_time));
 #endif	
 	LOG(INFO) << "Init complete, awaiting queries.";
 
@@ -509,8 +533,10 @@ gomi::gomi_t::destroy()
 {
 	LOG(INFO) << "Closing instance.";
 /* Unregister Tcl API. */
-	deregisterCommand (getId(), kLastBinFunctionName);
-	LOG(INFO) << "Unregistered Tcl API \"" << kLastBinFunctionName << "\"";
+	deregisterCommand (getId(), kRecalculateFunctionName);
+	LOG(INFO) << "Unregistered Tcl API \"" << kRecalculateFunctionName << "\"";
+	deregisterCommand (getId(), kRepublishLastBinFunctionName);
+	LOG(INFO) << "Unregistered Tcl API \"" << kRepublishLastBinFunctionName << "\"";
 	deregisterCommand (getId(), kRepublishFunctionName);
 	LOG(INFO) << "Unregistered Tcl API \"" << kRepublishFunctionName << "\"";
 	deregisterCommand (getId(), kFeedLogFunctionName);
@@ -576,8 +602,10 @@ gomi::gomi_t::execute (
 			retval = tclFeedLogQuery (cmdInfo, cmdData);
 		else if (0 == strcmp (command, kRepublishFunctionName))
 			retval = tclRepublishQuery (cmdInfo, cmdData);
-		else if (0 == strcmp (command, kLastBinFunctionName))
+		else if (0 == strcmp (command, kRepublishLastBinFunctionName))
 			retval = tclRepublishLastBinQuery (cmdInfo, cmdData);
+		else if (0 == strcmp (command, kRecalculateFunctionName))
+			retval = tclRecalculateQuery (cmdInfo, cmdData);
 		else
 			Tcl_SetResult (interp, "unknown function", TCL_STATIC);
 	}
@@ -703,7 +731,7 @@ gomi::gomi_t::tclGomiQuery (
 		}
 	}
 
-	get_bin (bin, query);
+	primitive::get_bin (bin, query, work_area_.get(), view_element_.get());
 
 	DVLOG(3) << "query complete, compiling result set.";
 
@@ -905,7 +933,7 @@ gomi::gomi_t::tclFeedLogQuery (
 		}
 	}
 
-	get_bin (bin, query);
+	primitive::get_bin (bin, query, work_area_.get(), view_element_.get());
 		
 /* create flexrecord for each result */
 	std::for_each (query.begin(), query.end(),
@@ -972,7 +1000,7 @@ gomi::gomi_t::tclRepublishQuery (
 	return TCL_OK;
 }
 
-/* gomi_last_bin
+/* gomi_republish_last_bin
  */
 int
 gomi::gomi_t::tclRepublishLastBinQuery (
@@ -994,6 +1022,38 @@ gomi::gomi_t::tclRepublishLastBinQuery (
 	try {
 		last_refresh_ = boost::posix_time::not_a_date_time;
 		timeRefresh();
+	} catch (rfa::common::InvalidUsageException& e) {
+		LOG(ERROR) << "InvalidUsageException: { "
+			"Severity: \"" << severity_string (e.getSeverity()) << "\""
+			", Classification: \"" << classification_string (e.getClassification()) << "\""
+			", StatusText: \"" << e.getStatus().getStatusText() << "\" }";
+	}
+	return TCL_OK;
+}
+
+/* gomi_recalculate
+ *
+ * similiar to gomi_republish but does not publish, and also calculates till end of day as yesterday.
+ */
+int
+gomi::gomi_t::tclRecalculateQuery (
+	const vpf::CommandInfo& cmdInfo,
+	vpf::TCLCommandData& cmdData
+	)
+{
+	TCLLibPtrs* tclStubsPtr = (TCLLibPtrs*)cmdData.mClientData;
+	Tcl_Interp* interp = cmdData.mInterp;		/* Current interpreter. */
+/* Refresh already running.  Note locking is handled outside query to enable
+ * feedback to Tcl interface.
+ */
+	boost::unique_lock<boost::shared_mutex> lock (query_mutex_, boost::try_to_lock_t());
+	if (!lock.owns_lock()) {
+		Tcl_SetResult (interp, "query already running", TCL_STATIC);
+		return TCL_ERROR;
+	}
+
+	try {
+		Recalculate();
 	} catch (rfa::common::InvalidUsageException& e) {
 		LOG(ERROR) << "InvalidUsageException: { "
 			"Severity: \"" << severity_string (e.getSeverity()) << "\""
@@ -1162,7 +1222,7 @@ LOG(INFO) << "No bins to re-calculate, last bin close: " << to_simple_string (bi
 	return true;
 }
 
-/* Refresh entire days analytic content.
+/* Refresh todays analytic content.
  */
 bool
 gomi::gomi_t::dayRefresh()
@@ -1209,6 +1269,51 @@ gomi::gomi_t::dayRefresh()
 	return true;
 }
 
+/* Recalculate 24-hour period analytic content.
+ */
+bool
+gomi::gomi_t::Recalculate()
+{
+	using namespace boost::posix_time;
+	using namespace boost::local_time;
+	const ptime t0 (microsec_clock::universal_time());
+	last_activity_ = t0;
+
+	LOG(INFO) << "Recalculate";
+
+/* Calculate affected bins */
+	const auto now_utc = second_clock::universal_time();
+	const local_date_time now_tz (now_utc, TZ_);
+	const auto now_td = now_tz.local_time().time_of_day();
+
+/* constant iterator in C++11 */
+	for (auto it = query_vector_.begin(); it != query_vector_.end(); ++it) {
+		for (auto jt = it->second.first.begin(); jt != it->second.first.end(); ++jt) {
+			auto& janku = *jt;
+			janku->clear();
+		}
+	}
+
+	for (auto it = bins_.begin();
+		it != bins_.end();
+		++it)
+	{
+		binRefresh (*it);
+	}
+
+/* clear iteration time */
+	last_refresh_ = boost::posix_time::not_a_date_time;
+
+/* Timing */
+	const ptime t1 (microsec_clock::universal_time());
+	const time_duration td = t1 - t0;
+	LOG(INFO) << "refresh complete " << td.total_milliseconds() << "ms";
+	if (td < min_refresh_time_) min_refresh_time_ = td;
+	if (td > max_refresh_time_) max_refresh_time_ = td;
+	total_refresh_time_ += td;
+	return true;
+}
+
 bool
 gomi::gomi_t::binRefresh (
 	const gomi::bin_t& ref_bin
@@ -1231,7 +1336,7 @@ gomi::gomi_t::binRefresh (
 
 /* refreshes last /x/ business days, i.e. executing on a holiday will only refresh the cache contents */
 	auto& v = query_vector_[bin];
-	get_bin (bin, v.first);
+	primitive::get_bin (bin, v.first, work_area_.get(), view_element_.get());
 
 /**  (i) Refresh realtime RIC **/
 

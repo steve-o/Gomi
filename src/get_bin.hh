@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cstdint>
+#include <list>
 #include <unordered_map>
 #include <string>
 #include <vector>
@@ -19,6 +20,8 @@
 
 /* Boost Posix Time */
 #include "boost/date_time/posix_time/posix_time.hpp"
+
+#include <TBPrimitives.h>
 
 namespace gomi
 {
@@ -48,6 +51,36 @@ namespace gomi
 		}
 	};
 
+/* FlexRecord Primitives implementation state */
+	class analytic_state_t {
+	public:
+		analytic_state_t() :
+			is_null (true)
+		{
+		}
+
+/* returns true if requested time window has already been calculated */
+		bool open (__time32_t close_time_)
+		{
+			if (!is_null && close_time == close_time_)
+				return true;
+			close_time = close_time_;
+			open_price = close_price = 0.0;
+			accumulated_volume = num_moves = 0;
+			is_null = false;
+			return false;
+		}
+
+		__time32_t	close_time;
+
+		double		open_price;
+		uint64_t	accumulated_volume;
+		uint64_t	num_moves;
+		double		close_price;
+
+		bool		is_null;
+	};
+
 /* result of analytics applied to a /bin/ */
 	class janku_t : boost::noncopyable
 	{
@@ -58,6 +91,7 @@ namespace gomi
 			tick_volume_field (tick_volume_field_)
 		{
 			clear();
+			handle = TBPrimitives::GetSymbolHandle (symbol_name.c_str(), 1);
 		}
 
 		void clear() {
@@ -70,6 +104,10 @@ namespace gomi
 
 /* Vhayu symbol name */
 		std::string	symbol_name;
+/* TBPrimitives handle */
+		TBSymbolHandle	handle;
+/* analytic state */
+		std::list<analytic_state_t> analytic_state;
 /* Vhayu field names */
 		std::string	last_price_field,
 				tick_volume_field;
@@ -92,7 +130,15 @@ namespace gomi
 	};
 
 /* for a given /bin/ calculate analytics for the set of symbols */
-	void get_bin (const bin_t& bin, std::vector<std::shared_ptr<janku_t>>& query);
+	namespace reference {
+		void get_bin (const bin_t& bin, std::vector<std::shared_ptr<janku_t>>& query);
+	}
+	namespace primitive {
+		void get_bin (const bin_t& bin, std::vector<std::shared_ptr<janku_t>>& query, FlexRecWorkAreaElement* work_area, FlexRecViewElement* view_element);
+	}
+	namespace single_iterator {
+		void get_bin (const bin_t& bin, std::vector<std::shared_ptr<janku_t>>& query);
+	}
 
 } /* namespace gomi */
 
