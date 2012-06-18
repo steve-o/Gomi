@@ -38,6 +38,8 @@ gomi::provider_t::provider_t (
 	config_ (config),
 	min_rwf_major_version_ (0),
 	min_rwf_minor_version_ (0)
+// Workaround for limited C++11 std::unordered_map API
+//	directory_ (1048576)
 {
 	ZeroMemory (cumulative_stats_, sizeof (cumulative_stats_));
 	ZeroMemory (snap_stats_, sizeof (snap_stats_));
@@ -51,6 +53,11 @@ gomi::provider_t::provider_t (
 		std::unique_ptr<session_t> session (new session_t (*this, i++, *it, rfa, event_queue));
 		sessions_.push_back (std::move (session));
 	}
+
+/* bucket capacity */
+// MSVC 2010 does not fully support C++11 API
+//	directory_.reserve (1048576);
+	LOG(INFO) << "Provider directory capacity: " << directory_.max_size();
 }
 
 gomi::provider_t::~provider_t()
@@ -83,6 +90,7 @@ gomi::provider_t::createItemStream (
 	)
 {
 	VLOG(4) << "Creating item stream for RIC \"" << name << "\".";
+	CHECK ((1 + directory_.size()) <= directory_.max_size());
 	item_stream->rfa_name.set (name, 0, true);
 	item_stream->token.resize (sessions_.size());
 	item_stream->token.shrink_to_fit();
@@ -97,8 +105,8 @@ gomi::provider_t::createItemStream (
 	});
 	const std::string key (name);
 	auto status = directory_.emplace (std::make_pair (key, item_stream));
-	assert (true == status.second);
-	assert (directory_.end() != directory_.find (key));
+	CHECK (true == status.second);
+	CHECK (directory_.end() != directory_.find (key));
 	DVLOG(4) << "Directory size: " << directory_.size();
 	last_activity_ = boost::posix_time::microsec_clock::universal_time();
 	return true;

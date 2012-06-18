@@ -1,0 +1,1 @@
+Portware bin based equity analytics plugin.

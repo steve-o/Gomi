@@ -7,8 +7,11 @@
 
 #include "chromium/logging.hh"
 #include "deleter.hh"
+#include "rfaostream.hh"
 
 using rfa::common::RFA_String;
+
+static const char* kAppName = "Gomi";
 
 static const RFA_String kContextName ("RFA");
 static const RFA_String kConnectionType ("RSSL_NIPROV");
@@ -44,6 +47,49 @@ fix_rfa_string_path (
 		rfa_str.replace ((unsigned)pos++, 1, "\\");
 #endif
 }
+
+namespace rfa {
+namespace config {
+	
+inline
+std::ostream& operator<< (std::ostream& o, const ConfigTree& config_tree)
+{
+	o << "\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\Reuters\\RFA\\" << kAppName << config_tree.getFullName() << "]\n";
+	auto pIt = config_tree.createIterator();
+	CHECK(pIt);
+	for (pIt->start(); !pIt->off(); pIt->forth()) {
+		auto pConfigNode = pIt->value();
+		switch (pConfigNode->getType()) {
+		case treeNode:
+			o << *static_cast<const ConfigTree*> (pConfigNode);
+			break;
+		case longValueNode:
+			o << '"' << pConfigNode->getNodename() << "\""
+				"=dword:" << std::hex << static_cast<const ConfigLong*> (pConfigNode)->getValue() << "\n";
+			break;
+		case boolValueNode:
+			o << '"' << pConfigNode->getNodename() << "\""
+				"=\"" << (static_cast<const ConfigBool*> (pConfigNode)->getValue() ? "true" : "false") << "\"\n";
+			break;
+		case stringValueNode:
+			o << '"' << pConfigNode->getNodename() << "\""
+				"=\"" << static_cast<const ConfigString*> (pConfigNode)->getValue() << "\"\n";
+			break;
+		case wideStringValueNode:
+		case stringListValueNode:
+		case wideStringListValueNode:
+		case softlinkNode:
+		default:
+			o << '"' << pConfigNode->getNodename() << "\"=<other type>\n";
+			break;
+		}
+	}
+	pIt->destroy();
+	return o;
+}
+
+} // config
+} // rfa
 
 gomi::rfa_t::rfa_t (const config_t& config) :
 	config_ (config)
@@ -113,6 +159,10 @@ gomi::rfa_t::init()
 			value.set (it->rssl_default_port.c_str());
 			staging->setString (name, value);
 		}
+/* Remove publish queue. */
+		name = "/Connections/" + connectionName + "/forceFlushOnWrite";
+		fix_rfa_string_path (name);
+		staging->setBool (name, true);
 	}
 
 	rfa_config_.reset (rfa::config::ConfigDatabase::acquire (kContextName));
@@ -136,6 +186,11 @@ gomi::rfa_t::init()
 		if (!rfa_config_->merge (*staging.get()))
 			return false;
 	}
+
+/* Dump effective registry */
+	std::ostringstream registry;
+	registry << "Windows Registry Editor Version 5.00\n" << *rfa_config_->getConfigTree();
+	LOG(INFO) << "Dumping configuration database:\n" << registry.str() << "\n";
 
 	VLOG(3) << "RFA initialization complete.";
 	return true;

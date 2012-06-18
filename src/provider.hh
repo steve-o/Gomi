@@ -11,7 +11,10 @@
 #include <unordered_map>
 
 /* Boost Posix Time */
-#include "boost/date_time/posix_time/posix_time.hpp"
+#include <boost/date_time/posix_time/posix_time.hpp>
+
+/* Boost Unordered C++11 implementation */
+#include <boost/unordered_map.hpp>
 
 /* Boost noncopyable base class */
 #include <boost/utility.hpp>
@@ -82,7 +85,11 @@ namespace gomi
 		std::vector<std::unique_ptr<session_t>> sessions_;
 
 /* Container of all item streams keyed by symbol name. */
-		std::unordered_map<std::string, std::weak_ptr<item_stream_t>> directory_;
+// MSVC 2010 faults on insert > 250k items without resizing in ctr.
+// MSVC 2010 faults in dtr with > 250k items.
+//		std::unordered_map<std::string, std::weak_ptr<item_stream_t>> directory_;
+//		std::map<std::string, std::weak_ptr<item_stream_t>> directory_;
+		boost::unordered_map<std::string, std::weak_ptr<item_stream_t>> directory_;
 
 		friend session_t;
 

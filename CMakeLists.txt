@@ -7,13 +7,21 @@ cmake_minimum_required (VERSION 2.8)
 project (Gomi)
 
 set(GOMI_VERSION_MAJOR 1)
-set(GOMI_VERSION_MINOR 3)
-set(GOMI_VERSION_BUILD 6)
+set(GOMI_VERSION_MINOR 4)
+set(GOMI_VERSION_BUILD 8)
 
 # Net-SNMP SDK installed, tested 5.7.1.
-set(NETSNMP_ROOT C:/usr)
-set(NETSNMP_INCLUDE_DIRS ${NETSNMP_ROOT}/include)
-set(NETSNMP_LIBRARY_DIRS ${NETSNMP_ROOT}/lib)
+set(NETSNMP_ROOT D:/net-snmp-5.7.1)
+set(NETSNMP_INCLUDE_DIRS
+	${NETSNMP_ROOT}/include/net-snmp
+	C:/usr/include
+)
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+	set(NETSNMP_BUILD_TYPE "debug")
+else (CMAKE_BUILD_TYPE STREQUAL "Debug")
+	set(NETSNMP_BUILD_TYPE "release")
+endif (CMAKE_BUILD_TYPE STREQUAL "Debug")
+set(NETSNMP_LIBRARY_DIRS ${NETSNMP_ROOT}/win32/lib/${NETSNMP_BUILD_TYPE})
 set(NETSNMP_LIBRARIES
 	netsnmp.lib
 	netsnmpagent.lib
@@ -26,8 +34,15 @@ set(VHAYU_INCLUDE_DIRS
 	${VHAYU_ROOT}/Engine/TBSDK/Include
 	${VHAYU_ROOT}/Engine/ThirdParty/xerces-c-3.1.1-x86_64-windows-vc-10.0/include
 )
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+	set(VHAYU_BUILD_TYPE "debug")
+	set(VHAYU_XERCES_LIBRARY "xerces-c_3D.lib")
+else (CMAKE_BUILD_TYPE STREQUAL "Debug")
+	set(VHAYU_BUILD_TYPE "release")
+	set(VHAYU_XERCES_LIBRARY "xerces-c_3.lib")
+endif (CMAKE_BUILD_TYPE STREQUAL "Debug")
 set(VHAYU_LIBRARY_DIRS
-	${VHAYU_ROOT}/Engine/TBSDK/Lib64/Release
+	${VHAYU_ROOT}/Engine/TBSDK/Lib64/${VHAYU_BUILD_TYPE}
 	${VHAYU_ROOT}/Engine/ThirdParty/xerces-c-3.1.1-x86_64-windows-vc-10.0/lib
 )
 set(VHAYU_LIBRARIES
@@ -35,16 +50,21 @@ set(VHAYU_LIBRARIES
 	PluginFramework.lib
 	Utility.lib
 	SEDll.lib
-	xerces-c_3.lib
+	${VHAYU_XERCES_LIBRARY}
 )
 
 # Thomson Reuters Robust Foundation API
-set(RFA_ROOT C:/rfa7.2.0.L1.win-shared.rrg)
+set(RFA_ROOT D:/rfa7.2.0.L1.win-shared.rrg)
 set(RFA_INCLUDE_DIRS
 	${RFA_ROOT}/Include
 	${RFA_ROOT}/Include/rwf
 )
-set(RFA_LIBRARY_DIRS ${RFA_ROOT}/Libs/WIN_64_VS100/Release_MD)
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+	set(RFA_BUILD_TYPE "Debug_MDd")
+else (CMAKE_BUILD_TYPE STREQUAL "Debug")
+	set(RFA_BUILD_TYPE "Release_MD")
+endif (CMAKE_BUILD_TYPE STREQUAL "Debug")
+set(RFA_LIBRARY_DIRS ${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE})
 set(RFA_LIBRARIES
         RFA7_Common100_x64.lib
         RFA7_Config100_x64.lib
@@ -54,9 +74,22 @@ set(RFA_LIBRARIES
         RFA7_Connections_OMM100_x64.lib
         RFA7_SessionLayer100_x64.lib
 )
+set(RFA_RUNTIME_LIBRARIES
+	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_Common100_x64.dll
+	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_Config100_x64.dll
+	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_Logger100_x64.dll
+	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_Data100_x64.dll
+	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_RSSL_Adapter100_x64.dll
+	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_RSSL_Cons_Adapter100_x64.dll
+	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_RSSL_Prov_Adapter100_x64.dll
+	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_Connections100_x64.dll
+	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_Connections_OMM100_x64.dll
+	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_SessionLayer_OMM100_x64.dll
+	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_SessionLayer100_x64.dll
+)
 
 # Boost headers plus built libraries
-set(BOOST_ROOT C:/boost_1_48_0)
+set(BOOST_ROOT D:/boost_1_48_0)
 set(BOOST_LIBRARYDIR ${BOOST_ROOT}/stage/lib)
 set(Boost_USE_STATIC_LIBS ON)
 find_package (Boost 1.44 COMPONENTS thread REQUIRED)
@@ -100,7 +133,7 @@ add_definitions(
 # Net-SNMP Autoconf overrides
 	-DHAVE_STDINT_H
 # production release
-	-DOFFICIAL_BUILD
+#	-DOFFICIAL_BUILD
 )
 
 # SEH Exceptions
@@ -126,7 +159,8 @@ configure_file(
 	COPYONLY
 )
 set(cxx-sources
-	src/get_bin.cc
+	src/gomi_bin.cc
+	src/gomi_bar.cc
 	src/config.cc
 	src/error.cc
 	src/plugin.cc
@@ -135,6 +169,7 @@ set(cxx-sources
 	src/rfa_logging.cc
 	src/session.cc
 	src/snmp_agent.cc
+	src/tcl.cc
 	src/gomi.cc
 	src/gomiMIB.cc
 	src/chromium/chromium_switches.cc
@@ -192,20 +227,6 @@ target_link_libraries(Gomi
 	dbghelp.lib
 )
 
-set(rfa_runtime_libraries
-	${RFA_ROOT}/Libs/WIN_64_VS100/Release_MD/RFA7_Common100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/Release_MD/RFA7_Config100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/Release_MD/RFA7_Logger100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/Release_MD/RFA7_Data100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/Release_MD/RFA7_RSSL_Adapter100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/Release_MD/RFA7_RSSL_Cons_Adapter100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/Release_MD/RFA7_RSSL_Prov_Adapter100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/Release_MD/RFA7_Connections100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/Release_MD/RFA7_Connections_OMM100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/Release_MD/RFA7_SessionLayer_OMM100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/Release_MD/RFA7_SessionLayer100_x64.dll
-)
-
 set(config
 	${CMAKE_CURRENT_SOURCE_DIR}/config/Gomi.xml
 	${CMAKE_CURRENT_SOURCE_DIR}/config/example.reg
@@ -213,7 +234,7 @@ set(config
 file(GLOB mibs "${CMAKE_CURRENT_SOURCE_DIR}/mibs/*.txt")
 
 install (TARGETS Gomi DESTINATION bin)
-install (FILES ${rfa_runtime_libraries} DESTINATION bin)
+install (FILES ${RFA_RUNTIME_LIBRARIES} DESTINATION bin)
 install (FILES ${config} DESTINATION config)
 install (FILES ${mibs} DESTINATION mibs)
 

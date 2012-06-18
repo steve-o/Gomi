@@ -11,7 +11,10 @@
 #include <Common/StandardPrincipalIdentity.h>
 #include <Common/TokenizedPrincipalIdentity.h>
 #include <Config/Config.h>
+#include <Config/ConfigBool.h>
 #include <Config/ConfigDatabase.h>
+#include <Config/ConfigLong.h>
+#include <Config/ConfigString.h>
 #include <Config/ConfigTree.h>
 #include <Config/StagingConfigDatabase.h>
 #include <Data/Array.h>
