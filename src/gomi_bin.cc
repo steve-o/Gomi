@@ -133,9 +133,12 @@ gomi::bin_t::Calculate (
 	uint64_t accumulated_volume = 0;
 	for (unsigned t = 0; t < bin_decl_.bin_day_count; ++t)
 	{
-		if (t < 20) twentyday_open_price  = bars_[t].GetOpenPrice();
-		if (t < 15) fifteenday_open_price = bars_[t].GetOpenPrice();
-		if (t < 10) tenday_open_price     = bars_[t].GetOpenPrice();
+		if (t < 20 && bars_[t].GetOpenPrice() > 0.0)
+			twentyday_open_price  = bars_[t].GetOpenPrice();
+		if (t < 15 && bars_[t].GetOpenPrice() > 0.0)
+			fifteenday_open_price = bars_[t].GetOpenPrice();
+		if (t < 10 && bars_[t].GetOpenPrice() > 0.0)
+			tenday_open_price     = bars_[t].GetOpenPrice();
 
 		accumulated_volume += bars_[t].GetAccumulatedVolume();
 		total_moves_       += bars_[t].GetNumberMoves();
@@ -166,19 +169,23 @@ gomi::bin_t::Calculate (
 
 /* finalize */
 	if (trading_day_count_ > 0) {
-		if (tenday_open_price > 0.0)
-			tenday_percentage_change_     = (100.0 * (bars_[0].GetClosePrice() - tenday_open_price))     / tenday_open_price;
-		if (fifteenday_open_price > 0.0)
-			fifteenday_percentage_change_ = (100.0 * (bars_[0].GetClosePrice() - fifteenday_open_price)) / fifteenday_open_price;
-		if (twentyday_open_price > 0.0)
-			twentyday_percentage_change_  = (100.0 * (bars_[0].GetClosePrice() - twentyday_open_price))  / twentyday_open_price;
+/* if last bar is empty, percentage change would be -100% */
+		if (bars_[0].GetClosePrice() > 0.0) {
+			if (tenday_open_price > 0.0)
+				tenday_percentage_change_     = (100.0 * (bars_[0].GetClosePrice() - tenday_open_price))     / tenday_open_price;
+			if (fifteenday_open_price > 0.0)
+				fifteenday_percentage_change_ = (100.0 * (bars_[0].GetClosePrice() - fifteenday_open_price)) / fifteenday_open_price;
+			if (twentyday_open_price > 0.0)
+				twentyday_percentage_change_  = (100.0 * (bars_[0].GetClosePrice() - twentyday_open_price))  / twentyday_open_price;
+		}
 		if (accumulated_volume > 0) {
 			average_volume_         = accumulated_volume / bin_decl_.bin_day_count;
 			average_nonzero_volume_ = accumulated_volume / trading_day_count_;
 		}
 	}
 
-	DVLOG(1) << "Calculate() complete,"
+//	DVLOG(1) << "Calculate() complete,"
+	LOG(INFO) << "Calculate() complete,"
 		" day_count=" << trading_day_count_ <<
 		" acvol=" << accumulated_volume << 
 		" avgvol=" << average_volume_ <<

@@ -1,4 +1,4 @@
-/* Tcl command exports/
+/* Tcl command exports
  */
 
 #include "gomi.hh"
