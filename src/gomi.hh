@@ -12,6 +12,9 @@
 #include <unordered_map>
 #include <tuple>
 
+/* Boost Chrono. */
+#include <boost/chrono.hpp>
+
 /* Boost Date Time */
 #include <boost/date_time/local_time/local_time.hpp>
 
@@ -28,7 +31,7 @@
 #include <boost/thread.hpp>
 
 /* RFA 7.2 */
-#include <rfa.hh>
+#include <rfa/rfa.hh>
 
 /* Velocity Analytics Plugin Framework */
 #include <vpf/vpf.h>
@@ -119,31 +122,30 @@ namespace gomi
 	};
 
 /* Periodic timer event source */
+	template<class Clock, class Duration = typename Clock::duration>
 	class time_base_t
 	{
 	public:
-		virtual ~time_base_t() {}
-		virtual bool processTimer (boost::posix_time::ptime t) = 0;
+		virtual bool processTimer (const boost::chrono::time_point<Clock, Duration>& t) = 0;
 	};
 
+	template<class Clock, class Duration = typename Clock::duration>
 	class time_pump_t
 	{
 	public:
-		time_pump_t (boost::posix_time::ptime due_time, boost::posix_time::time_duration td, time_base_t* cb) :
+		time_pump_t (const boost::chrono::time_point<Clock, Duration>& due_time, Duration td, time_base_t<Clock, Duration>* cb) :
 			due_time_ (due_time),
 			td_ (td),
 			cb_ (cb)
 		{
 			CHECK(nullptr != cb_);
-			if (due_time_.is_not_a_date_time())
-				due_time_ = boost::get_system_time() + td_;
 		}
 
 		void operator()()
 		{
 			try {
 				while (true) {
-					boost::this_thread::sleep (due_time_);
+					boost::this_thread::sleep_until (due_time_);
 					if (!cb_->processTimer (due_time_))
 						break;
 					due_time_ += td_;
@@ -154,13 +156,13 @@ namespace gomi
 		}
 
 	private:
-		boost::system_time due_time_;
-		boost::posix_time::time_duration td_;
-		time_base_t* cb_;
+		boost::chrono::time_point<Clock, Duration> due_time_;
+		Duration td_;
+		time_base_t<Clock, Duration>* cb_;
 	};
 
 	class gomi_t :
-		public time_base_t,
+		public time_base_t<boost::chrono::system_clock>,
 		public vpf::AbstractUserPlugin,
 		public vpf::Command,
 		boost::noncopyable
@@ -172,6 +174,9 @@ namespace gomi
 /* Plugin entry point. */
 		virtual void init (const vpf::UserPluginConfig& config_) override;
 
+/* Core initialization. */
+		bool init();
+
 /* Reset state suitable for recalling init(). */
 		void clear();
 
@@ -182,7 +187,7 @@ namespace gomi
 		virtual int execute (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData) override;
 
 /* Configured period timer entry point. */
-		virtual bool processTimer (boost::posix_time::ptime t) override;
+		bool processTimer (const boost::chrono::time_point<boost::chrono::system_clock>& t) override;
 
 /* Global list of all plugin instances.  AE owns pointer. */
 		static std::list<gomi_t*> global_list_;
@@ -289,8 +294,11 @@ namespace gomi
 /* Publish fields. */
 		rfa::data::FieldList fields_;
 
+/* Iterator for populating publish fields */
+		rfa::data::SingleWriteIterator single_write_it_;
+
 /* Thread timer. */
-		std::unique_ptr<time_pump_t> timer_;
+		std::unique_ptr<time_pump_t<boost::chrono::system_clock>> timer_;
 		std::unique_ptr<boost::thread> timer_thread_;
 
 /** Performance Counters. **/

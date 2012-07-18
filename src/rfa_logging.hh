@@ -12,7 +12,7 @@
 #include <boost/utility.hpp>
 
 /* RFA 7.2 */
-#include <rfa.hh>
+#include <rfa/rfa.hh>
 
 #include "config.hh"
 #include "deleter.hh"

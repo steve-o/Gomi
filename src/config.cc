@@ -79,6 +79,20 @@ gomi::config_t::validate()
 		LOG(ERROR) << "Undefined vendor name.";
 		return false;
 	}
+
+/* Maximum data size must be provided for buffer allocation. */
+	long value;
+
+	if (maximum_data_size.empty()) {
+		LOG(ERROR) << "Undefined maximum data size.";
+		return false;
+	}
+	value = std::atol (maximum_data_size.c_str());
+	if (value <= 0) {
+		LOG(ERROR) << "Invalid maximum data size \"" << maximum_data_size << "\".";
+		return false;
+	}
+
 	if (interval.empty()) {
 		LOG(ERROR) << "Undefined interval.";
 		return false;
@@ -278,6 +292,11 @@ gomi::config_t::parseRfaNode (
 	attr = xml.transcode (elem->getAttribute (L"key"));
 	if (!attr.empty())
 		key = attr;
+
+/* maximumDataSize="bytes" */
+	attr = xml.transcode (elem->getAttribute (L"maximumDataSize"));
+	if (!attr.empty())
+		maximum_data_size = attr;
 
 /* <service> */
 	nodeList = elem->getElementsByTagName (L"service");

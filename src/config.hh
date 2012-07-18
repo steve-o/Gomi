@@ -142,6 +142,9 @@ namespace gomi
 //  RFA vendor name.
 		std::string vendor_name;
 
+//  RFA maximum data buffer size for SingleWriteIterator.
+		std::string maximum_data_size;
+
 //  Time quantum interval in seconds for checking bin boundaries.
 		std::string interval;
 
@@ -178,10 +181,10 @@ namespace gomi
 	inline
 	std::ostream& operator<< (std::ostream& o, const session_config_t& session) {
 		o << "{ "
-			  "session_name: \"" << session.session_name << "\""
-			", connection_name: \"" << session.connection_name << "\""
-			", publisher_name: \"" << session.publisher_name << "\""
-			", rssl_servers: [ ";
+			  "\"session_name\": \"" << session.session_name << "\""
+			", \"connection_name\": \"" << session.connection_name << "\""
+			", \"publisher_name\": \"" << session.publisher_name << "\""
+			", \"rssl_servers\": [ ";
 		for (auto it = session.rssl_servers.begin();
 			it != session.rssl_servers.end();
 			++it)
@@ -191,11 +194,11 @@ namespace gomi
 			o << '"' << *it << '"';
 		}
 		o << " ]"
-			", rssl_default_port: \"" << session.rssl_default_port << "\""
-			", application_id: \"" << session.application_id << "\""
-			", instance_id: \"" << session.instance_id << "\""
-			", user_name: \"" << session.user_name << "\""
-			", position: \"" << session.position << "\""
+			", \"rssl_default_port\": \"" << session.rssl_default_port << "\""
+			", \"application_id\": \"" << session.application_id << "\""
+			", \"instance_id\": \"" << session.instance_id << "\""
+			", \"user_name\": \"" << session.user_name << "\""
+			", \"position\": \"" << session.position << "\""
 			" }";
 		return o;
 	}
@@ -203,15 +206,15 @@ namespace gomi
 	inline
 	std::ostream& operator<< (std::ostream& o, const fidset_t& fidset) {
 		o << "{ "
-			  "VMA: " << fidset.RdmAverageVolumeId <<
-			", NZERO_VMA: " <<  fidset.RdmAverageNonZeroVolumeId <<
-			", NUM_MOVES: " << fidset.RdmTotalMovesId <<
-			", NM_HIGH: " << fidset.RdmMaximumMovesId <<
-			", NM_LOW: " << fidset.RdmMinimumMovesId <<
-			", NM_SMALL: " << fidset.RdmSmallestMovesId <<
-			", PCTCHG_10D: " << fidset.Rdm10DayPercentChangeId <<
-			", PCTCHG_15D: " << fidset.Rdm15DayPercentChangeId <<
-			", PCTCHG_20D: " << fidset.Rdm20DayPercentChangeId <<
+			  "\"VMA\": " << fidset.RdmAverageVolumeId <<
+			", \"NZERO_VMA\": " <<  fidset.RdmAverageNonZeroVolumeId <<
+			", \"NUM_MOVES\": " << fidset.RdmTotalMovesId <<
+			", \"NM_HIGH\": " << fidset.RdmMaximumMovesId <<
+			", \"NM_LOW\": " << fidset.RdmMinimumMovesId <<
+			", \"NM_SMALL\": " << fidset.RdmSmallestMovesId <<
+			", \"PCTCHG_10D\": " << fidset.Rdm10DayPercentChangeId <<
+			", \"PCTCHG_15D\": " << fidset.Rdm15DayPercentChangeId <<
+			", \"PCTCHG_20D\": " << fidset.Rdm20DayPercentChangeId <<
 			" }";
 		return o;
 	}
@@ -219,12 +222,12 @@ namespace gomi
 	inline
 	std::ostream& operator<< (std::ostream& o, const config_t& config) {
 		o << "config_t: { "
-			  "is_snmp_enabled: \"" << config.is_snmp_enabled << "\""
-			", is_agentx_subagent: \"" << config.is_agentx_subagent << "\""
-			", agentx_socket: \"" << config.agentx_socket << "\""
-			", key: \"" << config.key << "\""
-			", service_name: \"" << config.service_name << "\""
-			", sessions: [";
+			  "\"is_snmp_enabled\": " << (0 == config.is_snmp_enabled ? "false" : "true") << ""
+			", \"is_agentx_subagent\": " << (0 == config.is_agentx_subagent ? "false" : "true") << ""
+			", \"agentx_socket\": \"" << config.agentx_socket << "\""
+			", \"key\": \"" << config.key << "\""
+			", \"service_name\": \"" << config.service_name << "\""
+			", \"sessions\": [";
 		for (auto it = config.sessions.begin();
 			it != config.sessions.end();
 			++it)
@@ -234,18 +237,19 @@ namespace gomi
 			o << *it;
 		}
 		o << " ]"
-			", monitor_name: \"" << config.monitor_name << "\""
-			", event_queue_name: \"" << config.event_queue_name << "\""
-			", vendor_name: \"" << config.vendor_name << "\""
-			", interval: \"" << config.interval << "\""
-			", tolerable_delay: \"" << config.tolerable_delay << "\""
-			", suffix: \"" << config.suffix << "\""
-			", symbolmap: \"" << config.symbolmap << "\""
-			", tz: \"" << config.tz << "\""
-			", tzdb: \"" << config.tzdb << "\""
-			", day_count: \"" << config.day_count << "\""
-			", archive_fids: " << config.archive_fids <<
-			", realtime_fids: { ";
+			", \"monitor_name\": \"" << config.monitor_name << "\""
+			", \"event_queue_name\": \"" << config.event_queue_name << "\""
+			", \"vendor_name\": \"" << config.vendor_name << "\""
+			", \"maximum_data_size\": \"" << config.maximum_data_size << "\""
+			", \"interval\": \"" << config.interval << "\""
+			", \"tolerable_delay\": \"" << config.tolerable_delay << "\""
+			", \"suffix\": \"" << config.suffix << "\""
+			", \"symbolmap\": \"" << config.symbolmap << "\""
+			", \"tz\": \"" << config.tz << "\""
+			", \"tzdb\": \"" << config.tzdb << "\""
+			", \"day_count\": \"" << config.day_count << "\""
+			", \"archive_fids\": " << config.archive_fids <<
+			", \"realtime_fids\": { ";
 		for (auto it = config.realtime_fids.begin();
 			it != config.realtime_fids.end();
 			++it)
@@ -254,7 +258,7 @@ namespace gomi
 				o << ", ";
 			o << it->first << ": " << it->second;
 		}
-		o << " }, bins: [ ";
+		o << " }, \"bins\": [ ";
 		for (auto it = config.bins.begin();
 			it != config.bins.end();
 			++it)

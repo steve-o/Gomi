@@ -7,7 +7,7 @@
 #pragma once
 
 /* RFA 7.2 */
-#include <rfa.hh>
+#include <rfa/rfa.hh>
 
 namespace rfa {
 namespace common {

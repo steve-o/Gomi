@@ -9,7 +9,7 @@
 #include <inttypes.h>
 
 /* Boost Posix Time */
-#include "boost/date_time/gregorian/gregorian_types.hpp"
+#include <boost/date_time/gregorian/gregorian_types.hpp>
 
 #include "chromium/file_util.hh"
 #include "chromium/logging.hh"
@@ -57,6 +57,18 @@ std::list<gomi::gomi_t*> gomi::gomi_t::global_list_;
 boost::shared_mutex gomi::gomi_t::global_list_lock_;
 
 using rfa::common::RFA_String;
+
+/* Convert Posix time to Unix Epoch time.
+ */
+template< typename TimeT >
+inline
+TimeT
+to_unix_epoch (
+	const boost::posix_time::ptime t
+	)
+{
+	return (t - boost::posix_time::ptime (kUnixEpoch)).total_seconds();
+}
 
 /* parse from /bin/ decls formatted as <name>=<start>-<end>, e.g. "OPEN=09:00-09:33"
  */
@@ -169,27 +181,40 @@ gomi::gomi_t::init (
 	const vpf::UserPluginConfig& vpf_config
 	)
 {
-	/* Thunk to VA user-plugin base class. */
+/* Thunk to VA user-plugin base class. */
 	vpf::AbstractUserPlugin::init (vpf_config);
 
 /* Save copies of provided identifiers. */
 	plugin_id_.assign (vpf_config.getPluginId());
 	plugin_type_.assign (vpf_config.getPluginType());
-	LOG(INFO) << "{ pluginType: \"" << plugin_type_ << "\""
-		", pluginId: \"" << plugin_id_ << "\""
-		", instance: " << instance_ <<
-		", version: \"" << version_major << '.' << version_minor << '.' << version_build << "\""
-		", build: { date: \"" << build_date << "\""
-			", time: \"" << build_time << "\""
-			", system: \"" << build_system << "\""
-			", machine: \"" << build_machine << "\""
+	LOG(INFO) << "{ "
+		  "\"pluginType\": \"" << plugin_type_ << "\""
+		", \"pluginId\": \"" << plugin_id_ << "\""
+		", \"instance\": " << instance_ <<
+		", \"version\": \"" << version_major << '.' << version_minor << '.' << version_build << "\""
+		", \"build\": { "
+			  "\"date\": \"" << build_date << "\""
+			", \"time\": \"" << build_time << "\""
+			", \"system\": \"" << build_system << "\""
+			", \"machine\": \"" << build_machine << "\""
 			" }"
 		" }";
 
-	std::vector<std::string> symbolmap;
+	if (!config_.parseDomElement (vpf_config.getXmlConfigData())) {
+		is_shutdown_ = true;
+		throw vpf::UserPluginException ("Invalid configuration, aborting.");
+	}
+	if (!init()) {
+		clear();
+		is_shutdown_ = true;
+		throw vpf::UserPluginException ("Initialization failed, aborting.");
+	}
+}
 
-	if (!config_.parseDomElement (vpf_config.getXmlConfigData()))
-		goto cleanup;
+bool
+gomi::gomi_t::init()
+{
+	std::vector<std::string> symbolmap;
 
 	LOG(INFO) << config_;
 
@@ -200,7 +225,7 @@ gomi::gomi_t::init (
 
 	if (!manager_->GetView ("Trade", view_element_->view)) {
 		LOG(ERROR) << "FlexRecDefinitionManager::GetView failed";
-		goto cleanup;
+		return false;
 	}
 
 /* Boost time zone database. */
@@ -208,17 +233,17 @@ gomi::gomi_t::init (
 		tzdb_.load_from_file (config_.tzdb);
 	} catch (boost::local_time::data_not_accessible& e) {
 		LOG(ERROR) << "Time zone specifications cannot be loaded: " << e.what();
-		goto cleanup;
+		return false;
 	} catch (boost::local_time::bad_field_count& e) {
 		LOG(ERROR) << "Time zone specifications malformed: " << e.what();
-		goto cleanup;
+		return false;
 	}
 
 /* default time zone */
 	TZ_ = tzdb_.time_zone_from_region (config_.tz);
 	if (nullptr == TZ_) {
 		LOG(ERROR) << "TZ not listed within configured time zone specifications.";
-		goto cleanup;
+		return false;
 	}
 
 /* /bin/ declarations */
@@ -228,7 +253,7 @@ gomi::gomi_t::init (
 		bin_decl_t bin;
 		if (!ParseBinDecl (*it, TZ_, day_count, &bin)) {
 			LOG(ERROR) << "Cannot parse bin delcs.";
-			goto cleanup;
+			return false;
 		}
 		bins_.insert (bin);
 	}
@@ -236,7 +261,7 @@ gomi::gomi_t::init (
 /* "Symbol map" a.k.a. list of Reuters Instrument Codes (RICs). */
 	if (!ReadSymbolMap (config_.symbolmap, &symbolmap)) {
 		LOG(ERROR) << "Cannot read symbolmap file: " << config_.symbolmap;
-		goto cleanup;
+		return false;
 	}
 
 /** RFA initialisation. **/
@@ -244,24 +269,24 @@ gomi::gomi_t::init (
 /* RFA context. */
 		rfa_.reset (new rfa_t (config_));
 		if (!(bool)rfa_ || !rfa_->init())
-			goto cleanup;
+			return false;
 
 /* RFA asynchronous event queue. */
 		const RFA_String eventQueueName (config_.event_queue_name.c_str(), 0, false);
 /* translation: event_queue_.destroy() */
 		event_queue_.reset (rfa::common::EventQueue::create (eventQueueName), std::mem_fn (&rfa::common::EventQueue::destroy));
 		if (!(bool)event_queue_)
-			goto cleanup;
+			return false;
 
 /* RFA logging. */
 		log_.reset (new logging::LogEventProvider (config_, event_queue_));
 		if (!(bool)log_ || !log_->Register())
-			goto cleanup;
+			return false;
 
 /* RFA provider. */
 		provider_.reset (new provider_t (config_, rfa_, event_queue_));
 		if (!(bool)provider_ || !provider_->init())
-			goto cleanup;
+			return false;
 
 /* Create state for published instruments: For every instrument, e.g. MSFT.O
  *	Realtime RIC: MSFT.O<suffix>
@@ -280,7 +305,7 @@ gomi::gomi_t::init (
 			auto stream = std::make_shared<realtime_stream_t> (symbol);
 			assert ((bool)stream);
 			if (!provider_->createItemStream (ss.str().c_str(), stream))
-				goto cleanup;
+				return false;
 			stream_vector_.push_back (stream);
 
 /* last 10-minute bin fidset is constant */
@@ -311,7 +336,7 @@ gomi::gomi_t::init (
 				auto stream = std::make_shared<archive_stream_t> (bin);
 				assert ((bool)stream);
 				if (!provider_->createItemStream (ss.str().c_str(), stream))
-					goto cleanup;
+					return false;
 				v.second.push_back (stream);
 
 /* add reference to this archive to realtime stream */
@@ -326,73 +351,81 @@ gomi::gomi_t::init (
 			query_vector_.emplace (std::make_pair (*it, v));
 		}
 
+/* Pre-allocate memory buffer for payload iterator */
+		const long maximum_data_size = std::atol (config_.maximum_data_size.c_str());
+		CHECK (maximum_data_size > 0);
+		single_write_it_.initialize (fields_, maximum_data_size);
+		CHECK (single_write_it_.isInitialized());
+
 /* daily bar archives */
 /* pre-allocate each day storage */
 	} catch (rfa::common::InvalidUsageException& e) {
 		LOG(ERROR) << "InvalidUsageException: { "
-			"Severity: \"" << severity_string (e.getSeverity()) << "\""
-			", Classification: \"" << classification_string (e.getClassification()) << "\""
-			", StatusText: \"" << e.getStatus().getStatusText() << "\" }";
-		goto cleanup;
+			  "\"Severity\": \"" << severity_string (e.getSeverity()) << "\""
+			", \"Classification\": \"" << classification_string (e.getClassification()) << "\""
+			", \"StatusText\": \"" << e.getStatus().getStatusText() << "\""
+			" }";
+		return false;
 	} catch (rfa::common::InvalidConfigurationException& e) {
 		LOG(ERROR) << "InvalidConfigurationException: { "
-			"Severity: \"" << severity_string (e.getSeverity()) << "\""
-			", Classification: \"" << classification_string (e.getClassification()) << "\""
-			", StatusText: \"" << e.getStatus().getStatusText() << "\""
-			", ParameterName: \"" << e.getParameterName() << "\""
-			", ParameterValue: \"" << e.getParameterValue() << "\" }";
-		goto cleanup;
+			  "\"Severity\": \"" << severity_string (e.getSeverity()) << "\""
+			", \"Classification\": \"" << classification_string (e.getClassification()) << "\""
+			", \"StatusText\": \"" << e.getStatus().getStatusText() << "\""
+			", \"ParameterName\": \"" << e.getParameterName() << "\""
+			", \"ParameterValue\": \"" << e.getParameterValue() << "\""
+			" }";
+		return false;
 	}
 
 /* No main loop inside this thread, must spawn new thread for message pump. */
 	event_pump_.reset (new event_pump_t (event_queue_));
 	if (!(bool)event_pump_)
-		goto cleanup;
+		return false;
 
 	event_thread_.reset (new boost::thread (*event_pump_.get()));
 	if (!(bool)event_thread_)
-		goto cleanup;
+		return false;
 
 /* Spawn SNMP implant. */
 	if (config_.is_snmp_enabled) {
 		snmp_agent_.reset (new snmp_agent_t (*this));
 		if (!(bool)snmp_agent_)
-			goto cleanup;
+			return false;
 	}
 
 /* Register Tcl commands with TREP-VA search engine and await callbacks. */
 	if (!register_tcl_api (getId()))
-		goto cleanup;
+		return false;
 
-	{
 /* Timer for periodic publishing.
  */
-		using namespace boost;
-		using namespace posix_time;
+	using namespace boost;
+	posix_time::ptime due_time;
+	if (!get_due_time (TZ_, &due_time)) {
+		LOG(ERROR) << "Cannot calculate timer due time.";
+		return false;
+	}
+/* convert Boost Posix Time into a Chrono time point */
+	const auto time = to_unix_epoch<std::time_t> (due_time);
+	const auto tp = chrono::system_clock::from_time_t (time);
 
-		ptime due_time;
-		if (!get_due_time (TZ_, &due_time)) {
-			LOG(ERROR) << "Cannot calculate timer due time.";
-			goto cleanup;
-		}
-		const time_duration td (seconds (std::stoul (config_.interval)));
-		timer_.reset (new time_pump_t (due_time, td, this));
-		if (!(bool)timer_)
-			goto cleanup;
-		timer_thread_.reset (new boost::thread (*timer_.get()));
-		if (!(bool)timer_thread_)
-			goto cleanup;
-		LOG(INFO) << "Added periodic timer, interval " << to_simple_string (td)
-			<< ", due time " << to_simple_string (due_time);
+	const chrono::seconds td (std::stoul (config_.interval));
+	timer_.reset (new time_pump_t<chrono::system_clock> (tp, td, this));
+	if (!(bool)timer_) {
+		LOG(ERROR) << "Cannot create time pump.";
+		return false;
+	}
+	timer_thread_.reset (new thread (*timer_.get()));
+	if (!(bool)timer_thread_) {
+		LOG(ERROR) << "Cannot spawn timer thread.";
+		return false;
 	}
 
+	LOG(INFO) << "Added periodic timer, interval " << td.count() << " seconds"
+		<< ", due time " << posix_time::to_simple_string (due_time);
+
 	LOG(INFO) << "Init complete, awaiting queries.";
-	return;
-cleanup:
-	LOG(INFO) << "Init failed, cleaning up.";
-	clear();
-	is_shutdown_ = true;
-	throw vpf::UserPluginException ("Init failed.");
+	return true;
 }
 
 void
@@ -440,8 +473,8 @@ gomi::gomi_t::destroy()
 	unregister_tcl_api (getId());
 	clear();
 	LOG(INFO) << "Runtime summary: {"
-		    " tclQueryReceived: " << cumulative_stats_[GOMI_PC_TCL_QUERY_RECEIVED] <<
-		   ", timerQueryReceived: " << cumulative_stats_[GOMI_PC_TIMER_QUERY_RECEIVED] <<
+		    " \"tclQueryReceived\": " << cumulative_stats_[GOMI_PC_TCL_QUERY_RECEIVED] <<
+		   ", \"timerQueryReceived\": " << cumulative_stats_[GOMI_PC_TIMER_QUERY_RECEIVED] <<
 		" }";
 	LOG(INFO) << "Instance closed.";
 	vpf::AbstractUserPlugin::destroy();
@@ -451,18 +484,20 @@ gomi::gomi_t::destroy()
  */
 bool
 gomi::gomi_t::processTimer (
-	boost::posix_time::ptime t
+	const boost::chrono::time_point<boost::chrono::system_clock>& t
 	)
 {
 /* calculate timer accuracy, typically 15-1ms with default timer resolution.
  */
 	if (DLOG_IS_ON(INFO)) {
-		const boost::posix_time::ptime now (boost::posix_time::microsec_clock::universal_time());
-		const auto ms = (now - t).total_milliseconds();
-		if (0 == ms)
-			LOG(INFO) << "delta " << (now - t).total_microseconds() << "us";
-		else
-			LOG(INFO) << "delta " << ms << "ms";
+		using namespace boost::chrono;
+		auto now = system_clock::now();
+		auto ms = duration_cast<milliseconds> (now - t);
+		if (0 == ms.count()) {
+			LOG(INFO) << "delta " << duration_cast<microseconds> (now - t).count() << "us";
+		} else {
+			LOG(INFO) << "delta " << ms.count() << "ms";
+		}
 	}
 
 	cumulative_stats_[GOMI_PC_TIMER_QUERY_RECEIVED]++;
@@ -478,9 +513,10 @@ gomi::gomi_t::processTimer (
 		timeRefresh();
 	} catch (rfa::common::InvalidUsageException& e) {
 		LOG(ERROR) << "InvalidUsageException: { "
-			"Severity: \"" << severity_string (e.getSeverity()) << "\""
-			", Classification: \"" << classification_string (e.getClassification()) << "\""
-			", StatusText: \"" << e.getStatus().getStatusText() << "\" }";
+			  "\"Severity\": \"" << severity_string (e.getSeverity()) << "\""
+			", \"Classification\": \"" << classification_string (e.getClassification()) << "\""
+			", \"StatusText\": \"" << e.getStatus().getStatusText() << "\""
+			" }";
 	}
 	return true;
 }
@@ -819,46 +855,12 @@ gomi::gomi_t::binRefresh (
 	fields_.setAssociatedMetaInfo (provider_->getRwfMajorVersion(), provider_->getRwfMinorVersion());
 	fields_.setInfo (kDictionaryId, kFieldListId);
 
-/* DataBuffer based fields must be pre-encoded and post-bound. */
-	rfa::data::FieldListWriteIterator it;
-	rfa::data::FieldEntry timeact_field (false), activ_date_field (false), price_field (false), integer_field (false);
-	rfa::data::DataBuffer timeact_data (false), activ_date_data (false), price_data (false), integer_data (false);
-	rfa::data::Real64 real64, integer64;
-	rfa::data::Time rfaTime;
-	rfa::data::Date rfaDate;
+/* TIMEACT & ACTIV_DATE */
 	struct tm _tm;
-
-/* TIMEACT */
 	CHECK (!v.first.empty());
 	const auto& first = v.first[0];
-	using namespace boost::posix_time;
-	timeact_field.setFieldID (kRdmTimeOfUpdateId);
-	__time32_t time32 = (first->GetCloseTime() - ptime (kUnixEpoch)).total_seconds();
+	__time32_t time32 = to_unix_epoch<__time32_t> (first->GetCloseTime());
 	_gmtime32_s (&_tm, &time32);
-	rfaTime.setHour   (_tm.tm_hour);
-	rfaTime.setMinute (_tm.tm_min);
-	rfaTime.setSecond (_tm.tm_sec);
-	rfaTime.setMillisecond (0);
-	timeact_data.setTime (rfaTime);
-	timeact_field.setData (timeact_data);
-
-/* PCTCHG_10D, etc, as PRICE field type */
-	real64.setMagnitudeType (rfa::data::ExponentNeg6);
-	price_data.setReal64 (real64);
-	price_field.setData (price_data);
-
-/* VMA_20D, etc, as integer field type */
-	integer64.setMagnitudeType (rfa::data::Exponent0);
-	integer_data.setReal64 (integer64);
-	integer_field.setData (integer_data);
-
-/* ACTIV_DATE */
-	activ_date_field.setFieldID (kRdmActiveDateId);
-	rfaDate.setDay   (/* rfa(1-31) */ _tm.tm_mday        /* tm(1-31) */);
-	rfaDate.setMonth (/* rfa(1-12) */ 1 + _tm.tm_mon     /* tm(0-11) */);
-	rfaDate.setYear  (/* rfa(yyyy) */ 1900 + _tm.tm_year /* tm(yyyy-1900 */);
-	activ_date_data.setDate (rfaDate);
-	activ_date_field.setData (activ_date_data);
 
 	rfa::common::RespStatus status;
 /* Item interaction state: Open, Closed, ClosedRecover, Redirected, NonStreaming, or Unspecified. */
@@ -871,57 +873,73 @@ gomi::gomi_t::binRefresh (
 
 	std::for_each (v.second.begin(), v.second.end(), [&](std::shared_ptr<archive_stream_t>& stream)
 	{
-		VLOG(1) << "publish: " << stream->rfa_name;
+		VLOG(1) << "Publishing to stream " << stream->rfa_name;
 		attribInfo.setName (stream->rfa_name);
+
+/* Clear required for SingleWriteIterator state machine. */
+		auto& it = single_write_it_;
+		DCHECK (it.isInitialized());
+		it.clear();
 		it.start (fields_);
+
+/* For each field set the Id via a FieldEntry bound to the iterator followed by setting the data.
+ * The iterator API provides setters for common types excluding 32-bit floats, with fallback to 
+ * a generic DataBuffer API for other types or support of pre-calculated values.
+ */
+		rfa::data::FieldEntry field (false);
 /* TIMACT */
-		it.bind (timeact_field);
+		field.setFieldID (kRdmTimeOfUpdateId);
+		it.bind (field);
+		it.setTime (_tm.tm_hour, _tm.tm_min, _tm.tm_sec, 0 /* ms */);
 
 /* PRICE field is a rfa::Real64 value specified as <mantissa> × 10?.
  * Rfa deprecates setting via <double> data types so we create a mantissa from
  * source value and consider that we publish to 6 decimal places.
  */
 /* PCTCHG_10D */
-		price_field.setFieldID (config_.archive_fids.Rdm10DayPercentChangeId);
-		const int64_t pctchg_10d_mantissa = portware::mantissa (stream->bin->GetTenDayPercentageChange());
-		real64.setValue (pctchg_10d_mantissa);		
-		it.bind (price_field);
+		field.setFieldID (config_.archive_fids.Rdm10DayPercentChangeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (stream->bin->GetTenDayPercentageChange()), rfa::data::ExponentNeg6);
 /* PCTCHG_15D */
-		price_field.setFieldID (config_.archive_fids.Rdm15DayPercentChangeId);
-		const int64_t pctchg_15d_mantissa = portware::mantissa (stream->bin->GetFifteenDayPercentageChange());
-		real64.setValue (pctchg_15d_mantissa);		
-		it.bind (price_field);
+		field.setFieldID (config_.archive_fids.Rdm15DayPercentChangeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (stream->bin->GetFifteenDayPercentageChange()), rfa::data::ExponentNeg6);
 /* PCTCHG_20D */
-		price_field.setFieldID (config_.archive_fids.Rdm20DayPercentChangeId);
-		const int64_t pctchg_20d_mantissa = portware::mantissa (stream->bin->GetTwentyDayPercentageChange());
-		real64.setValue (pctchg_20d_mantissa);		
-		it.bind (price_field);
+		field.setFieldID (config_.archive_fids.Rdm20DayPercentChangeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (stream->bin->GetTwentyDayPercentageChange()), rfa::data::ExponentNeg6);
 /* VMA_20D */
-		integer_field.setFieldID (config_.archive_fids.RdmAverageVolumeId);
-		integer64.setValue (stream->bin->GetAverageVolume());
-		it.bind (integer_field);
+		field.setFieldID (config_.archive_fids.RdmAverageVolumeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (stream->bin->GetAverageVolume()), rfa::data::Exponent0);
 /* VMA_20TD */
-		integer_field.setFieldID (config_.archive_fids.RdmAverageNonZeroVolumeId);
-		integer64.setValue (stream->bin->GetAverageNonZeroVolume());
-		it.bind (integer_field);
+		field.setFieldID (config_.archive_fids.RdmAverageNonZeroVolumeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (stream->bin->GetAverageNonZeroVolume()), rfa::data::Exponent0);
 /* TRDCNT_20D */
-		integer_field.setFieldID (config_.archive_fids.RdmTotalMovesId);
-		integer64.setValue (stream->bin->GetTotalMoves());
-		it.bind (integer_field);
+		field.setFieldID (config_.archive_fids.RdmTotalMovesId);
+		it.bind (field);
+		it.setReal (portware::mantissa (stream->bin->GetTotalMoves()), rfa::data::Exponent0);
 /* HICNT_20D */
-		integer_field.setFieldID (config_.archive_fids.RdmMaximumMovesId);
-		integer64.setValue (stream->bin->GetMaximumMoves());
-		it.bind (integer_field);
+		field.setFieldID (config_.archive_fids.RdmMaximumMovesId);
+		it.bind (field);
+		it.setReal (portware::mantissa (stream->bin->GetMaximumMoves()), rfa::data::Exponent0);
 /* LOCNT_20D */
-		integer_field.setFieldID (config_.archive_fids.RdmMinimumMovesId);
-		integer64.setValue (stream->bin->GetMinimumMoves());
-		it.bind (integer_field);
+		field.setFieldID (config_.archive_fids.RdmMinimumMovesId);
+		it.bind (field);
+		it.setReal (portware::mantissa (stream->bin->GetMinimumMoves()), rfa::data::Exponent0);
 /* SMCNT_20D */
-		integer_field.setFieldID (config_.archive_fids.RdmSmallestMovesId);
-		integer64.setValue (stream->bin->GetSmallestMoves());
-		it.bind (integer_field);
+		field.setFieldID (config_.archive_fids.RdmSmallestMovesId);
+		it.bind (field);
+		it.setReal (portware::mantissa (stream->bin->GetSmallestMoves()), rfa::data::Exponent0);
 /* ACTIV_DATE */
-		it.bind (activ_date_field);
+		field.setFieldID (kRdmActiveDateId);
+		it.bind (field);
+		const uint16_t year  = /* rfa(yyyy) */ 1900 + _tm.tm_year /* tm(yyyy-1900 */;
+		const uint8_t  month = /* rfa(1-12) */    1 + _tm.tm_mon  /* tm(0-11) */;
+		const uint8_t  day   = /* rfa(1-31) */        _tm.tm_mday /* tm(1-31) */;
+		it.setDate (year, month, day);
+
 		it.complete();
 		response.setPayload (fields_);
 
@@ -933,7 +951,7 @@ gomi::gomi_t::binRefresh (
 		RFA_String warningText;
 		const uint8_t validation_status = response.validateMsg (&warningText);
 		if (rfa::message::MsgValidationWarning == validation_status) {
-			LOG(ERROR) << "respMsg::validateMsg: { warningText: \"" << warningText << "\" }";
+			LOG(ERROR) << "respMsg::validateMsg: { \"warningText\": \"" << warningText << "\" }";
 		} else {
 			assert (rfa::message::MsgValidationOk == validation_status);
 		}
@@ -1134,7 +1152,7 @@ gomi::gomi_t::summaryRefresh ()
 		RFA_String warningText;
 		const uint8_t validation_status = response.validateMsg (&warningText);
 		if (rfa::message::MsgValidationWarning == validation_status) {
-			LOG(ERROR) << "respMsg::validateMsg: { warningText: \"" << warningText << "\" }";
+			LOG(ERROR) << "respMsg::validateMsg: { \"warningText\": \"" << warningText << "\" }";
 		} else {
 			assert (rfa::message::MsgValidationOk == validation_status);
 		}

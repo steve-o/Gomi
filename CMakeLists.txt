@@ -2,13 +2,13 @@
 # x64 Windows Server-only
 # 2012/03/09 -- Steven.McCoy@thomsonreuters.com
 
-cmake_minimum_required (VERSION 2.8)
+cmake_minimum_required (VERSION 2.8.8)
 
 project (Gomi)
 
 set(GOMI_VERSION_MAJOR 1)
-set(GOMI_VERSION_MINOR 4)
-set(GOMI_VERSION_BUILD 8)
+set(GOMI_VERSION_MINOR 5)
+set(GOMI_VERSION_BUILD 9)
 
 # Net-SNMP SDK installed, tested 5.7.1.
 set(NETSNMP_ROOT D:/net-snmp-5.7.1)
@@ -54,7 +54,7 @@ set(VHAYU_LIBRARIES
 )
 
 # Thomson Reuters Robust Foundation API
-set(RFA_ROOT D:/rfa7.2.0.L1.win-shared.rrg)
+set(RFA_ROOT D:/rfa7.2.1.L1.win-shared.rrg)
 set(RFA_INCLUDE_DIRS
 	${RFA_ROOT}/Include
 	${RFA_ROOT}/Include/rwf
@@ -65,6 +65,7 @@ else (CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set(RFA_BUILD_TYPE "Release_MD")
 endif (CMAKE_BUILD_TYPE STREQUAL "Debug")
 set(RFA_LIBRARY_DIRS ${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE})
+set(RFA_LIBRARY_DIR ${RFA_LIBRARY_DIRS})
 set(RFA_LIBRARIES
         RFA7_Common100_x64.lib
         RFA7_Config100_x64.lib
@@ -75,24 +76,24 @@ set(RFA_LIBRARIES
         RFA7_SessionLayer100_x64.lib
 )
 set(RFA_RUNTIME_LIBRARIES
-	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_Common100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_Config100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_Logger100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_Data100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_RSSL_Adapter100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_RSSL_Cons_Adapter100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_RSSL_Prov_Adapter100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_Connections100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_Connections_OMM100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_SessionLayer_OMM100_x64.dll
-	${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE}/RFA7_SessionLayer100_x64.dll
+	${RFA_LIBRARY_DIR}/RFA7_Common100_x64.dll
+	${RFA_LIBRARY_DIR}/RFA7_Config100_x64.dll
+	${RFA_LIBRARY_DIR}/RFA7_Logger100_x64.dll
+	${RFA_LIBRARY_DIR}/RFA7_Data100_x64.dll
+	${RFA_LIBRARY_DIR}/RFA7_Connections100_x64.dll
+	${RFA_LIBRARY_DIR}/RFA7_Connections_OMM100_x64.dll
+	${RFA_LIBRARY_DIR}/RFA7_SessionLayer_OMM100_x64.dll
+	${RFA_LIBRARY_DIR}/RFA7_SessionLayer100_x64.dll
+	${RFA_LIBRARY_DIR}/RFA7_RSSL_Adapter100_x64.dll
+	${RFA_LIBRARY_DIR}/RFA7_RSSL_Cons_Adapter100_x64.dll
+	${RFA_LIBRARY_DIR}/RFA7_RSSL_Prov_Adapter100_x64.dll
 )
 
 # Boost headers plus built libraries
-set(BOOST_ROOT D:/boost_1_48_0)
+set(BOOST_ROOT D:/boost_1_50_0)
 set(BOOST_LIBRARYDIR ${BOOST_ROOT}/stage/lib)
 set(Boost_USE_STATIC_LIBS ON)
-find_package (Boost 1.44 COMPONENTS thread REQUIRED)
+find_package (Boost 1.50 COMPONENTS chrono thread REQUIRED)
 
 find_package(PythonInterp REQUIRED)
 
@@ -132,6 +133,8 @@ add_definitions(
 	-D_WIN32_WINNT=0x0600
 # Net-SNMP Autoconf overrides
 	-DHAVE_STDINT_H
+# RFA version
+        -DRFA_LIBRARY_VERSION="7.2.1."
 # production release
 #	-DOFFICIAL_BUILD
 )
