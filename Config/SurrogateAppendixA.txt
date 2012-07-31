@@ -47,6 +47,18 @@ PCTCHG_20D "PRICE PCTCHG 20D"      11  NULL        PRICE              17
 !
 ! Trade Price percentage change calculation against 20th previous day.
 !
+PCTCHG_10T "PRICE PCTCHG 10TD"     76  NULL        PRICE              17
+!
+! Trade Price percentage change calculation against 10th previous trading-day
+!
+PCTCHG_15T "PRICE PCTCHG 15TD"     91  NULL        PRICE              17
+!
+! Trade Price percentage change calculation against 15th previous trading-day.
+!
+PCTCHG_20T "PRICE PCTCHG 20TD"     92  NULL        PRICE              17
+!
+! Trade Price percentage change calculation against 20th previous trading-day.
+!
 OPN_B_MA20 "OPEN BIN 20D MA"       64  NULL        INTEGER            15
 OP2_B_MA20 "O/PRE BIN 20D MA"      65  NULL        INTEGER            15
 CLS_B_MA20 "CLOSE BIN 20D MA"      77  NULL        INTEGER            15
@@ -130,4 +142,28 @@ LST_B_PC20 "LST HOUR BIN 20D PC"   69  NULL        PRICE              17
 10M_B_PC20 "LST 10MN BIN 20D PC"   75  NULL        PRICE              17
 !
 ! Trade Price percentage change for various time period bins.
+!
+OPN_B_PT10 "OPEN BIN 10TD PCTCHG"  93  NULL        PRICE              17
+OPN_B_PT15 "OPEN BIN 15TD PCTCHG"  94  NULL        PRICE              17
+OPN_B_PT20 "OPEN BIN 20TD PCTCHG"  95  NULL        PRICE              17
+OP2_B_PT10 "O/PRE BN 10TD PCTCHG"  98  NULL        PRICE              17
+OP2_B_PT15 "O/PRE BN 15TD PCTCHG" 100  NULL        PRICE              17
+OP2_B_PT20 "O/PRE BN 20TD PCTCHG" 114  NULL        PRICE              17
+CLS_B_PT10 "CLOSE BN 10TD PCTCHG" 120  NULL        PRICE              17
+CLS_B_PT15 "CLOSE BN 15TD PCTCHG" 121  NULL        PRICE              17
+CLS_B_PT20 "CLOSE BN 20TD PCTCHG" 122  NULL        PRICE              17
+CL2_B_PT10 "C/POST BIN 10TD PC"   123  NULL        PRICE              17
+CL2_B_PT15 "C/POST BIN 15TD PC"   124  NULL        PRICE              17
+CL2_B_PT20 "C/POST BIN 20TD PC"   125  NULL        PRICE              17
+1ST_B_PT10 "1ST HOUR BIN 10TD PC" 126  NULL        PRICE              17
+1ST_B_PT15 "1ST HOUR BIN 15TD PC" 127  NULL        PRICE              17
+1ST_B_PT20 "1ST HOUR BIN 20TD PC" 128  NULL        PRICE              17
+LST_B_PT10 "LST HOUR BIN 10TD PC" 129  NULL        PRICE              17
+LST_B_PT15 "LST HOUR BIN 15TD PC" 130  NULL        PRICE              17
+LST_B_PT20 "LST HOUR BIN 20TD PC" 132  NULL        PRICE              17
+10M_B_PT10 "LST 10MN BIN 10TD PC" 134  NULL        PRICE              17
+10M_B_PT15 "LST 10MN BIN 15TD PC" 135  NULL        PRICE              17
+10M_B_PT20 "LST 10MN BIN 20TD PC" 136  NULL        PRICE              17
+!
+! Trade Price percentage change for various trading-day time period bins.
 !

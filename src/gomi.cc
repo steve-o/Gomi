@@ -908,30 +908,42 @@ gomi::gomi_t::binRefresh (
 		field.setFieldID (config_.archive_fids.Rdm20DayPercentChangeId);
 		it.bind (field);
 		it.setReal (portware::mantissa (stream->bin->GetTwentyDayPercentageChange()), rfa::data::ExponentNeg6);
+/* PCTCHG_10T */
+		field.setFieldID (config_.archive_fids.Rdm10TradingDayPercentChangeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (stream->bin->GetTenTradingDayPercentageChange()), rfa::data::ExponentNeg6);
+/* PCTCHG_15T */
+		field.setFieldID (config_.archive_fids.Rdm15TradingDayPercentChangeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (stream->bin->GetFifteenTradingDayPercentageChange()), rfa::data::ExponentNeg6);
+/* PCTCHG_20T */
+		field.setFieldID (config_.archive_fids.Rdm20TradingDayPercentChangeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (stream->bin->GetTwentyTradingDayPercentageChange()), rfa::data::ExponentNeg6);
 /* VMA_20D */
 		field.setFieldID (config_.archive_fids.RdmAverageVolumeId);
 		it.bind (field);
-		it.setReal (portware::mantissa (stream->bin->GetAverageVolume()), rfa::data::Exponent0);
+		it.setReal (stream->bin->GetAverageVolume(), rfa::data::Exponent0);
 /* VMA_20TD */
 		field.setFieldID (config_.archive_fids.RdmAverageNonZeroVolumeId);
 		it.bind (field);
-		it.setReal (portware::mantissa (stream->bin->GetAverageNonZeroVolume()), rfa::data::Exponent0);
+		it.setReal (stream->bin->GetAverageNonZeroVolume(), rfa::data::Exponent0);
 /* TRDCNT_20D */
 		field.setFieldID (config_.archive_fids.RdmTotalMovesId);
 		it.bind (field);
-		it.setReal (portware::mantissa (stream->bin->GetTotalMoves()), rfa::data::Exponent0);
+		it.setReal (stream->bin->GetTotalMoves(), rfa::data::Exponent0);
 /* HICNT_20D */
 		field.setFieldID (config_.archive_fids.RdmMaximumMovesId);
 		it.bind (field);
-		it.setReal (portware::mantissa (stream->bin->GetMaximumMoves()), rfa::data::Exponent0);
+		it.setReal (stream->bin->GetMaximumMoves(), rfa::data::Exponent0);
 /* LOCNT_20D */
 		field.setFieldID (config_.archive_fids.RdmMinimumMovesId);
 		it.bind (field);
-		it.setReal (portware::mantissa (stream->bin->GetMinimumMoves()), rfa::data::Exponent0);
+		it.setReal (stream->bin->GetMinimumMoves(), rfa::data::Exponent0);
 /* SMCNT_20D */
 		field.setFieldID (config_.archive_fids.RdmSmallestMovesId);
 		it.bind (field);
-		it.setReal (portware::mantissa (stream->bin->GetSmallestMoves()), rfa::data::Exponent0);
+		it.setReal (stream->bin->GetSmallestMoves(), rfa::data::Exponent0);
 /* ACTIV_DATE */
 		field.setFieldID (kRdmActiveDateId);
 		it.bind (field);
@@ -1030,44 +1042,10 @@ gomi::gomi_t::summaryRefresh ()
 	fields_.setAssociatedMetaInfo (provider_->getRwfMajorVersion(), provider_->getRwfMinorVersion());
 	fields_.setInfo (kDictionaryId, kFieldListId);
 
-/* DataBuffer based fields must be pre-encoded and post-bound. */
-	rfa::data::FieldListWriteIterator it;
-	rfa::data::FieldEntry timeact_field (false), activ_date_field (false), price_field (false), integer_field (false);
-	rfa::data::DataBuffer timeact_data (false), activ_date_data (false), price_data (false), integer_data (false);
-	rfa::data::Real64 real64, integer64;
-	rfa::data::Time rfaTime;
-	rfa::data::Date rfaDate;
-	struct tm _tm;
-
 /* TIMEACT */
-	using namespace boost::posix_time;
-	timeact_field.setFieldID (kRdmTimeOfUpdateId);
-	__time32_t time32 = (close_time - ptime (kUnixEpoch)).total_seconds();
+	struct tm _tm;
+	__time32_t time32 = to_unix_epoch<__time32_t> (close_time);
 	_gmtime32_s (&_tm, &time32);
-	rfaTime.setHour   (_tm.tm_hour);
-	rfaTime.setMinute (_tm.tm_min);
-	rfaTime.setSecond (_tm.tm_sec);
-	rfaTime.setMillisecond (0);
-	timeact_data.setTime (rfaTime);
-	timeact_field.setData (timeact_data);
-
-/* PCTCHG_10D, etc, as PRICE field type */
-	real64.setMagnitudeType (rfa::data::ExponentNeg6);
-	price_data.setReal64 (real64);
-	price_field.setData (price_data);
-
-/* VMA_20D, etc, as integer field type */
-	integer64.setMagnitudeType (rfa::data::Exponent0);
-	integer_data.setReal64 (integer64);
-	integer_field.setData (integer_data);
-
-/* ACTIV_DATE */
-	activ_date_field.setFieldID (kRdmActiveDateId);
-	rfaDate.setDay   (/* rfa(1-31) */ _tm.tm_mday        /* tm(1-31) */);
-	rfaDate.setMonth (/* rfa(1-12) */ 1 + _tm.tm_mon     /* tm(0-11) */);
-	rfaDate.setYear  (/* rfa(yyyy) */ 1900 + _tm.tm_year /* tm(yyyy-1900 */);
-	activ_date_data.setDate (rfaDate);
-	activ_date_field.setData (activ_date_data);
 
 	rfa::common::RespStatus status;
 /* Item interaction state: Open, Closed, ClosedRecover, Redirected, NonStreaming, or Unspecified. */
@@ -1082,51 +1060,70 @@ gomi::gomi_t::summaryRefresh ()
 	{
 		VLOG(1) << "publish: " << stream->rfa_name;
 		attribInfo.setName (stream->rfa_name);
-		it.start (fields_);
-/* TIMACT */
-		it.bind (timeact_field);
 
-		auto add_fidset = [&](const fidset_t& fids, std::shared_ptr<bin_t> bin)
+/* Clear required for SingleWriteIterator state machine. */
+		auto& it = single_write_it_;
+		DCHECK (it.isInitialized());
+		it.clear();
+		it.start (fields_);
+
+		rfa::data::FieldEntry field (false);
+/* TIMACT */
+		field.setFieldID (kRdmTimeOfUpdateId);
+		it.bind (field);
+		it.setTime (_tm.tm_hour, _tm.tm_min, _tm.tm_sec, 0 /* ms */);
+
+		auto add_fidset = [&it](const fidset_t& fids, std::shared_ptr<bin_t>& bin)
 		{
+			rfa::data::FieldEntry field (false);
 /* PCTCHG_10D */
-			price_field.setFieldID (fids.Rdm10DayPercentChangeId);
-			const int64_t pctchg_10d_mantissa = portware::mantissa (bin->GetTenDayPercentageChange());
-			real64.setValue (pctchg_10d_mantissa);		
-			it.bind (price_field);
+			field.setFieldID (fids.Rdm10DayPercentChangeId);
+			it.bind (field);
+			it.setReal (portware::mantissa (bin->GetTenDayPercentageChange()), rfa::data::ExponentNeg6);
 /* PCTCHG_15D */
-			price_field.setFieldID (fids.Rdm15DayPercentChangeId);
-			const int64_t pctchg_15d_mantissa = portware::mantissa (bin->GetFifteenDayPercentageChange());
-			real64.setValue (pctchg_15d_mantissa);		
-			it.bind (price_field);
+			field.setFieldID (fids.Rdm15DayPercentChangeId);
+			it.bind (field);
+			it.setReal (portware::mantissa (bin->GetFifteenDayPercentageChange()), rfa::data::ExponentNeg6);
 /* PCTCHG_20D */
-			price_field.setFieldID (fids.Rdm20DayPercentChangeId);
-			const int64_t pctchg_20d_mantissa = portware::mantissa (bin->GetTwentyDayPercentageChange());
-			real64.setValue (pctchg_20d_mantissa);		
-			it.bind (price_field);
+			field.setFieldID (fids.Rdm20DayPercentChangeId);
+			it.bind (field);
+			it.setReal (portware::mantissa (bin->GetTwentyDayPercentageChange()), rfa::data::ExponentNeg6);
+/* PCTCHG_10T */
+			field.setFieldID (fids.Rdm10TradingDayPercentChangeId);
+			it.bind (field);
+			it.setReal (portware::mantissa (bin->GetTenTradingDayPercentageChange()), rfa::data::ExponentNeg6);
+/* PCTCHG_15T */
+			field.setFieldID (fids.Rdm15TradingDayPercentChangeId);
+			it.bind (field);
+			it.setReal (portware::mantissa (bin->GetFifteenTradingDayPercentageChange()), rfa::data::ExponentNeg6);
+/* PCTCHG_20T */
+			field.setFieldID (fids.Rdm20TradingDayPercentChangeId);
+			it.bind (field);
+			it.setReal (portware::mantissa (bin->GetTwentyTradingDayPercentageChange()), rfa::data::ExponentNeg6);
 /* VMA_20D */
-			integer_field.setFieldID (fids.RdmAverageVolumeId);
-			integer64.setValue (bin->GetAverageVolume());
-			it.bind (integer_field);
+			field.setFieldID (fids.RdmAverageVolumeId);
+			it.bind (field);
+			it.setReal (bin->GetAverageVolume(), rfa::data::Exponent0);
 /* VMA_20TD */
-			integer_field.setFieldID (fids.RdmAverageNonZeroVolumeId);
-			integer64.setValue (bin->GetAverageNonZeroVolume());
-			it.bind (integer_field);
+			field.setFieldID (fids.RdmAverageNonZeroVolumeId);
+			it.bind (field);
+			it.setReal (bin->GetAverageNonZeroVolume(), rfa::data::Exponent0);
 /* TRDCNT_20D */
-			integer_field.setFieldID (fids.RdmTotalMovesId);
-			integer64.setValue (bin->GetTotalMoves());
-			it.bind (integer_field);
+			field.setFieldID (fids.RdmTotalMovesId);
+			it.bind (field);
+			it.setReal (bin->GetTotalMoves(), rfa::data::Exponent0);
 /* HICNT_20D */
-			integer_field.setFieldID (fids.RdmMaximumMovesId);
-			integer64.setValue (bin->GetMaximumMoves());
-			it.bind (integer_field);
+			field.setFieldID (fids.RdmMaximumMovesId);
+			it.bind (field);
+			it.setReal (bin->GetMaximumMoves(), rfa::data::Exponent0);
 /* LOCNT_20D */
-			integer_field.setFieldID (fids.RdmMinimumMovesId);
-			integer64.setValue (bin->GetMinimumMoves());
-			it.bind (integer_field);
+			field.setFieldID (fids.RdmMinimumMovesId);
+			it.bind (field);
+			it.setReal (bin->GetMinimumMoves(), rfa::data::Exponent0);
 /* SMCNT_20D */
-			integer_field.setFieldID (fids.RdmSmallestMovesId);
-			integer64.setValue (bin->GetSmallestMoves());
-			it.bind (integer_field);
+			field.setFieldID (fids.RdmSmallestMovesId);
+			it.bind (field);
+			it.setReal (bin->GetSmallestMoves(), rfa::data::Exponent0);
 		};
 
 /* every special named bin analytic */
@@ -1140,7 +1137,13 @@ gomi::gomi_t::summaryRefresh ()
 			add_fidset (stream->last_10min.first, stream->last_10min.second[last_10min_bin]->bin);
 
 /* ACTIV_DATE */
-		it.bind (activ_date_field);
+		field.setFieldID (kRdmActiveDateId);
+		it.bind (field);
+		const uint16_t year  = /* rfa(yyyy) */ 1900 + _tm.tm_year /* tm(yyyy-1900 */;
+		const uint8_t  month = /* rfa(1-12) */    1 + _tm.tm_mon  /* tm(0-11) */;
+		const uint8_t  day   = /* rfa(1-31) */        _tm.tm_mday /* tm(1-31) */;
+		it.setDate (year, month, day);
+
 		it.complete();
 		response.setPayload (fields_);
 

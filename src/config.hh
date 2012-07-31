@@ -79,6 +79,12 @@ namespace gomi
 		int	Rdm15DayPercentChangeId;
 /* PCTCHG_20D: 20-day percentage change in price */
 		int	Rdm20DayPercentChangeId;
+/* PCTCHG_10TD: 10-trading-day percentage change in price */
+		int	Rdm10TradingDayPercentChangeId;
+/* PCTCHG_15TD: 15-trading-day percentage change in price */
+		int	Rdm15TradingDayPercentChangeId;
+/* PCTCHG_20TD: 20-trading-day percentage change in price */
+		int	Rdm20TradingDayPercentChangeId;
 	};
 
 	struct config_t
@@ -215,6 +221,9 @@ namespace gomi
 			", \"PCTCHG_10D\": " << fidset.Rdm10DayPercentChangeId <<
 			", \"PCTCHG_15D\": " << fidset.Rdm15DayPercentChangeId <<
 			", \"PCTCHG_20D\": " << fidset.Rdm20DayPercentChangeId <<
+			", \"PCTCHG_10T\": " << fidset.Rdm10TradingDayPercentChangeId <<
+			", \"PCTCHG_15T\": " << fidset.Rdm15TradingDayPercentChangeId <<
+			", \"PCTCHG_20T\": " << fidset.Rdm20TradingDayPercentChangeId <<
 			" }";
 		return o;
 	}

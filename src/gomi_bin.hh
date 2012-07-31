@@ -83,7 +83,8 @@ namespace gomi
 		}
 
 		void Clear() {
-			tenday_percentage_change_ = fifteenday_percentage_change_ = twentyday_percentage_change_ = 0.0;
+			tenday_avg_pc_ = fifteenday_avg_pc_ = twentyday_avg_pc_ = 0.0;
+			tenday_avg_nonzero_pc_ = fifteenday_avg_nonzero_pc_ = twentyday_avg_nonzero_pc_ = 0.0;
 			average_volume_ = average_nonzero_volume_ = total_moves_ = maximum_moves_ = minimum_moves_ = smallest_moves_ = 0;
 			close_time_ = boost::posix_time::not_a_date_time;
 			trading_day_count_ = 0;
@@ -94,9 +95,12 @@ namespace gomi
 		bool Calculate (const boost::gregorian::date& date, FlexRecWorkAreaElement* work_area, FlexRecViewElement* view_element);
 
 		const char* GetSymbolName() { return symbol_name_.c_str(); }
-		const double GetTenDayPercentageChange() { return tenday_percentage_change_; }
-		const double GetFifteenDayPercentageChange() { return fifteenday_percentage_change_; }
-		const double GetTwentyDayPercentageChange() { return twentyday_percentage_change_; }
+		const double GetTenDayPercentageChange() { return tenday_avg_pc_; }
+		const double GetFifteenDayPercentageChange() { return fifteenday_avg_pc_; }
+		const double GetTwentyDayPercentageChange() { return twentyday_avg_pc_; }
+		const double GetTenTradingDayPercentageChange() { return tenday_avg_nonzero_pc_; }
+		const double GetFifteenTradingDayPercentageChange() { return fifteenday_avg_nonzero_pc_; }
+		const double GetTwentyTradingDayPercentageChange() { return twentyday_avg_nonzero_pc_; }
 		const uint64_t GetAverageVolume() { return average_volume_; }
 		const uint64_t GetAverageNonZeroVolume() { return average_nonzero_volume_; }
 		const uint64_t GetTotalMoves() { return total_moves_; }
@@ -120,9 +124,9 @@ namespace gomi
 /* analytic state */
 		std::vector<bar_t>	bars_;
 /* analytic results */
-		double			tenday_percentage_change_,
-					fifteenday_percentage_change_,
-					twentyday_percentage_change_;
+		double			tenday_avg_pc_,      tenday_avg_nonzero_pc_,
+					fifteenday_avg_pc_,  fifteenday_avg_nonzero_pc_,
+					twentyday_avg_pc_,   twentyday_avg_nonzero_pc_;
 		uint64_t		average_volume_, average_nonzero_volume_;
 		uint64_t		total_moves_;
 		uint64_t		maximum_moves_;

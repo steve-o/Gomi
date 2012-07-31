@@ -129,23 +129,37 @@ gomi::bin_t::Calculate (
 	}
 
 /* collate result set */
-	double tenday_open_price, fifteenday_open_price, twentyday_open_price;
 	uint64_t accumulated_volume = 0;
+	double   accumulated_pc     = 0.0;
 	for (unsigned t = 0; t < bin_decl_.bin_day_count; ++t)
 	{
-		if (t < 20 && bars_[t].GetOpenPrice() > 0.0)
-			twentyday_open_price  = bars_[t].GetOpenPrice();
-		if (t < 15 && bars_[t].GetOpenPrice() > 0.0)
-			fifteenday_open_price = bars_[t].GetOpenPrice();
-		if (t < 10 && bars_[t].GetOpenPrice() > 0.0)
-			tenday_open_price     = bars_[t].GetOpenPrice();
+		const double open_price = bars_[t].GetOpenPrice(),
+			    close_price = bars_[t].GetClosePrice();
 
 		accumulated_volume += bars_[t].GetAccumulatedVolume();
 		total_moves_       += bars_[t].GetNumberMoves();
 
+		if (open_price > 0.0)
+			accumulated_pc += ((100.0 * (close_price - open_price)) / open_price);
+
+		if (t < 20)
+			twentyday_avg_pc_  = accumulated_pc / t;
+		if (t < 15)
+			fifteenday_avg_pc_ = accumulated_pc / t;
+		if (t < 10)
+			tenday_avg_pc_     = accumulated_pc / t;
+
 /* test for zero-trade day */
-		if (bars_[t].GetNumberMoves() > 0)
+		if (bars_[t].GetNumberMoves() > 0) {
 			++trading_day_count_;
+
+			if (t < 20)
+				twentyday_avg_nonzero_pc_  = accumulated_pc / trading_day_count_;
+			if (t < 15)
+				fifteenday_avg_nonzero_pc_ = accumulated_pc / trading_day_count_;
+			if (t < 10)
+				tenday_avg_nonzero_pc_     = accumulated_pc / trading_day_count_;
+		}
 
 		if (is_null_) {
 			is_null_ = false;
@@ -168,20 +182,9 @@ gomi::bin_t::Calculate (
 	}
 
 /* finalize */
-	if (trading_day_count_ > 0) {
-/* if last bar is empty, percentage change would be -100% */
-		if (bars_[0].GetClosePrice() > 0.0) {
-			if (tenday_open_price > 0.0)
-				tenday_percentage_change_     = (100.0 * (bars_[0].GetClosePrice() - tenday_open_price))     / tenday_open_price;
-			if (fifteenday_open_price > 0.0)
-				fifteenday_percentage_change_ = (100.0 * (bars_[0].GetClosePrice() - fifteenday_open_price)) / fifteenday_open_price;
-			if (twentyday_open_price > 0.0)
-				twentyday_percentage_change_  = (100.0 * (bars_[0].GetClosePrice() - twentyday_open_price))  / twentyday_open_price;
-		}
-		if (accumulated_volume > 0) {
-			average_volume_         = accumulated_volume / bin_decl_.bin_day_count;
-			average_nonzero_volume_ = accumulated_volume / trading_day_count_;
-		}
+	if (trading_day_count_ > 0 && accumulated_volume > 0) {
+		average_volume_         = accumulated_volume / bin_decl_.bin_day_count;
+		average_nonzero_volume_ = accumulated_volume / trading_day_count_;
 	}
 
 //	DVLOG(1) << "Calculate() complete,"
@@ -194,9 +197,12 @@ gomi::bin_t::Calculate (
 		" hicnt=" << maximum_moves_ <<
 		" locnt=" << minimum_moves_ <<
 		" smcnt=" << smallest_moves_ <<
-		" pctchg_10d=" << tenday_percentage_change_ <<
-		" pctchg_15d=" << fifteenday_percentage_change_ <<
-		" pctchg_20d=" << twentyday_percentage_change_;
+		" pctchg_10d=" << tenday_avg_pc_ <<
+		" pctchg_15d=" << fifteenday_avg_pc_ <<
+		" pctchg_20d=" << twentyday_avg_pc_ <<
+		" pctchg_10td=" << tenday_avg_nonzero_pc_ <<
+		" pctchg_15td=" << fifteenday_avg_nonzero_pc_ <<
+		" pctchg_20td=" << twentyday_avg_nonzero_pc_;
 	return true;
 }
 

@@ -48,7 +48,8 @@
      Override settings in this file with the Windows registry by setting the key name
      as a parameter, e.g.
 
-	<Rfa key="HKLM/SOFTWARE/Reuters/RFA/Gomi">
+	<Rfa key="HKLM/SOFTWARE/Reuters/RFA/Gomi"
+		maximumDataSize="8192">
 
      NB:  RFA will raise an exception and the plugin will terminate if at least one value
      is not defined underneath the key.
@@ -106,111 +107,134 @@
 
 		<fields>
 			<archive>
-				<fid name="VMA"        value="-100"/>
-				<fid name="NZERO_VMA"  value="-101"/>
-				<fid name="NUM_MOVES"  value="-102"/>
-				<fid name="NM_HIGH"    value="-103"/>
-				<fid name="NM_LOW"     value="-104"/>
-				<fid name="NM_SMALL"   value="-105"/>
+				<fid name="VMA"        value="30"/>
+				<fid name="NZERO_VMA"  value="31"/>
+				<fid name="NUM_MOVES"  value="32"/>
+				<fid name="NM_HIGH"    value="42"/>
+				<fid name="NM_LOW"     value="43"/>
+				<fid name="NM_SMALL"   value="55"/>
 				<fid name="PCTCHG_10D" value="3726"/>
-				<fid name="PCTCHG_15D" value="-106"/>
-				<fid name="PCTCHG_20D" value="-107"/>
+				<fid name="PCTCHG_15D" value="10"/>
+				<fid name="PCTCHG_20D" value="11"/>
+				<fid name="PCTCHG_10T" value="76"/>
+				<fid name="PCTCHG_15T" value="91"/>
+				<fid name="PCTCHG_20T" value="92"/>
 			</archive>
 			<realtime>
 				<bin name="OPEN">
-					<fid name="VMA"        value="-108"/>
-					<fid name="NZERO_VMA"  value="-115"/>
-					<fid name="NUM_MOVES"  value="-122"/>
-					<fid name="NM_HIGH"    value="-129"/>
-					<fid name="NM_LOW"     value="-136"/>
-					<fid name="NM_SMALL"   value="-143"/>
-					<fid name="PCTCHG_10D" value="-150"/>
-					<fid name="PCTCHG_15D" value="-151"/>
-					<fid name="PCTCHG_20D" value="-152"/>
+					<fid name="VMA"        value="64"/>
+					<fid name="NZERO_VMA"  value="84"/>
+					<fid name="NUM_MOVES"  value="106"/>
+					<fid name="NM_HIGH"    value="189"/>
+					<fid name="NM_LOW"     value="289"/>
+					<fid name="NM_SMALL"   value="377"/>
+					<fid name="PCTCHG_10D" value="19"/>
+					<fid name="PCTCHG_15D" value="21"/>
+					<fid name="PCTCHG_20D" value="34"/>
+					<fid name="PCTCHG_10T" value="93"/>
+					<fid name="PCTCHG_15T" value="94"/>
+					<fid name="PCTCHG_20T" value="95"/>
 				</bin>
 				<bin name="OPEN2">
-					<fid name="VMA"        value="-109"/>
-					<fid name="NZERO_VMA"  value="-116"/>
-					<fid name="NUM_MOVES"  value="-123"/>
-					<fid name="NM_HIGH"    value="-130"/>
-					<fid name="NM_LOW"     value="-137"/>
-					<fid name="NM_SMALL"   value="-144"/>
-					<fid name="PCTCHG_10D" value="-153"/>
-					<fid name="PCTCHG_15D" value="-154"/>
-					<fid name="PCTCHG_20D" value="-155"/>
+					<fid name="VMA"        value="65"/>
+					<fid name="NZERO_VMA"  value="85"/>
+					<fid name="NUM_MOVES"  value="108"/>
+					<fid name="NM_HIGH"    value="190"/>
+					<fid name="NM_LOW"     value="299"/>
+					<fid name="NM_SMALL"   value="383"/>
+					<fid name="PCTCHG_10D" value="35"/>
+					<fid name="PCTCHG_15D" value="36"/>
+					<fid name="PCTCHG_20D" value="47"/>
+					<fid name="PCTCHG_10T" value="98"/>
+					<fid name="PCTCHG_15T" value="100"/>
+					<fid name="PCTCHG_20T" value="114"/>
 				</bin>
 				<bin name="CLOSE">
-					<fid name="VMA"        value="-110"/>
-					<fid name="NZERO_VMA"  value="-117"/>
-					<fid name="NUM_MOVES"  value="-124"/>
-					<fid name="NM_HIGH"    value="-131"/>
-					<fid name="NM_LOW"     value="-138"/>
-					<fid name="NM_SMALL"   value="-145"/>
-					<fid name="PCTCHG_10D" value="-156"/>
-					<fid name="PCTCHG_15D" value="-157"/>
-					<fid name="PCTCHG_20D" value="-158"/>
+					<fid name="VMA"        value="77"/>
+					<fid name="NZERO_VMA"  value="86"/>
+					<fid name="NUM_MOVES"  value="116"/>
+					<fid name="NM_HIGH"    value="191"/>
+					<fid name="NM_LOW"     value="300"/>
+					<fid name="NM_SMALL"   value="401"/>
+					<fid name="PCTCHG_10D" value="48"/>
+					<fid name="PCTCHG_15D" value="50"/>
+					<fid name="PCTCHG_20D" value="51"/>
+					<fid name="PCTCHG_10T" value="120"/>
+					<fid name="PCTCHG_15T" value="121"/>
+					<fid name="PCTCHG_20T" value="122"/>
 				</bin>
 				<bin name="CLOSE2">
-					<fid name="VMA"        value="-111"/>
-					<fid name="NZERO_VMA"  value="-118"/>
-					<fid name="NUM_MOVES"  value="-125"/>
-					<fid name="NM_HIGH"    value="-132"/>
-					<fid name="NM_LOW"     value="-139"/>
-					<fid name="NM_SMALL"   value="-146"/>
-					<fid name="PCTCHG_10D" value="-159"/>
-					<fid name="PCTCHG_15D" value="-160"/>
-					<fid name="PCTCHG_20D" value="-161"/>
+					<fid name="VMA"        value="80"/>
+					<fid name="NZERO_VMA"  value="87"/>
+					<fid name="NUM_MOVES"  value="183"/>
+					<fid name="NM_HIGH"    value="192"/>
+					<fid name="NM_LOW"     value="301"/>
+					<fid name="NM_SMALL"   value="402"/>
+					<fid name="PCTCHG_10D" value="56"/>
+					<fid name="PCTCHG_15D" value="57"/>
+					<fid name="PCTCHG_20D" value="59"/>
+					<fid name="PCTCHG_10T" value="123"/>
+					<fid name="PCTCHG_15T" value="124"/>
+					<fid name="PCTCHG_20T" value="125"/>
 				</bin>
 				<bin name="FIRST">
-					<fid name="VMA"        value="-112"/>
-					<fid name="NZERO_VMA"  value="-119"/>
-					<fid name="NUM_MOVES"  value="-126"/>
-					<fid name="NM_HIGH"    value="-133"/>
-					<fid name="NM_LOW"     value="-140"/>
-					<fid name="NM_SMALL"   value="-147"/>
-					<fid name="PCTCHG_10D" value="-162"/>
-					<fid name="PCTCHG_15D" value="-163"/>
-					<fid name="PCTCHG_20D" value="-164"/>
+					<fid name="VMA"        value="81"/>
+					<fid name="NZERO_VMA"  value="88"/>
+					<fid name="NUM_MOVES"  value="184"/>
+					<fid name="NM_HIGH"    value="193"/>
+					<fid name="NM_LOW"     value="302"/>
+					<fid name="NM_SMALL"   value="403"/>
+					<fid name="PCTCHG_10D" value="60"/>
+					<fid name="PCTCHG_15D" value="61"/>
+					<fid name="PCTCHG_20D" value="62"/>
+					<fid name="PCTCHG_10T" value="126"/>
+					<fid name="PCTCHG_15T" value="127"/>
+					<fid name="PCTCHG_20T" value="128"/>
 				</bin>
 				<bin name="LAST">
-					<fid name="VMA"        value="-113"/>
-					<fid name="NZERO_VMA"  value="-120"/>
-					<fid name="NUM_MOVES"  value="-127"/>
-					<fid name="NM_HIGH"    value="-134"/>
-					<fid name="NM_LOW"     value="-141"/>
-					<fid name="NM_SMALL"   value="-148"/>
-					<fid name="PCTCHG_10D" value="-165"/>
-					<fid name="PCTCHG_15D" value="-166"/>
-					<fid name="PCTCHG_20D" value="-167"/>
+					<fid name="VMA"        value="82"/>
+					<fid name="NZERO_VMA"  value="89"/>
+					<fid name="NUM_MOVES"  value="187"/>
+					<fid name="NM_HIGH"    value="194"/>
+					<fid name="NM_LOW"     value="368"/>
+					<fid name="NM_SMALL"   value="404"/>
+					<fid name="PCTCHG_10D" value="63"/>
+					<fid name="PCTCHG_15D" value="66"/>
+					<fid name="PCTCHG_20D" value="69"/>
+					<fid name="PCTCHG_10T" value="129"/>
+					<fid name="PCTCHG_15T" value="130"/>
+					<fid name="PCTCHG_20T" value="132"/>
 				</bin>
 				<bin name="10MIN">
-					<fid name="VMA"        value="-114"/>
-					<fid name="NZERO_VMA"  value="-121"/>
-					<fid name="NUM_MOVES"  value="-128"/>
-					<fid name="NM_HIGH"    value="-135"/>
-					<fid name="NM_LOW"     value="-142"/>
-					<fid name="NM_SMALL"   value="-149"/>
-					<fid name="PCTCHG_10D" value="-168"/>
-					<fid name="PCTCHG_15D" value="-169"/>
-					<fid name="PCTCHG_20D" value="-170"/>
-
+					<fid name="VMA"        value="83"/>
+					<fid name="NZERO_VMA"  value="101"/>
+					<fid name="NUM_MOVES"  value="188"/>
+					<fid name="NM_HIGH"    value="211"/>
+					<fid name="NM_LOW"     value="373"/>
+					<fid name="NM_SMALL"   value="405"/>
+					<fid name="PCTCHG_10D" value="70"/>
+					<fid name="PCTCHG_15D" value="71"/>
+					<fid name="PCTCHG_20D" value="75"/>
+					<fid name="PCTCHG_10T" value="134"/>
+					<fid name="PCTCHG_15T" value="135"/>
+					<fid name="PCTCHG_20T" value="136"/>
 				</bin>
 			</realtime>
 		</fields>
 
 		<bins>
 			<bin name="OPEN">
-				<time>9:25</time>
 				<time>9:30</time>
+				<time>9:40</time>
 			</bin>
 <!-- OPEN + pre-market -->
 			<bin name="OPEN2">
 				<time>4:00</time>
-				<time>9:30</time>
+				<time>9:40</time>
 			</bin>
 			<bin name="CLOSE">
 				<time>16:00</time>
-				<time>16:05</time>
+				<time>16:10</time>
 			</bin>
 <!-- CLOSE + post-market -->
 			<bin name="CLOSE2">
@@ -225,7 +249,7 @@
 <!-- Last hour of trading -->
 			<bin name="LAST">
 				<time>15:00</time>
-				<time>16:00</time>
+				<time>16:10</time>
 			</bin>
 
 <!-- 10 minute bins -->

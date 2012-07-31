@@ -121,7 +121,10 @@ gomi::config_t::validate()
 	    !archive_fids.RdmSmallestMovesId ||
 	    !archive_fids.Rdm10DayPercentChangeId ||
 	    !archive_fids.Rdm15DayPercentChangeId ||
-	    !archive_fids.Rdm20DayPercentChangeId)
+	    !archive_fids.Rdm20DayPercentChangeId ||
+	    !archive_fids.Rdm10TradingDayPercentChangeId ||
+	    !archive_fids.Rdm15TradingDayPercentChangeId ||
+	    !archive_fids.Rdm20TradingDayPercentChangeId )
 	{
 		LOG(ERROR) << "Undefined archive FID set.";
 		return false;
@@ -141,7 +144,10 @@ gomi::config_t::validate()
 		    !it->second.RdmSmallestMovesId ||
 		    !it->second.Rdm10DayPercentChangeId ||
 		    !it->second.Rdm15DayPercentChangeId ||
-		    !it->second.Rdm20DayPercentChangeId)
+		    !it->second.Rdm20DayPercentChangeId ||
+		    !it->second.Rdm10TradingDayPercentChangeId ||
+		    !it->second.Rdm15TradingDayPercentChangeId ||
+		    !it->second.Rdm20TradingDayPercentChangeId)
 		{
 			LOG(ERROR) << "Undefined realtime FID set.";
 			return false;
@@ -716,6 +722,9 @@ gomi::config_t::parseFidNode (
 	else if ("PCTCHG_10D" == name)	fid = &fidset.Rdm10DayPercentChangeId;
 	else if ("PCTCHG_15D" == name)	fid = &fidset.Rdm15DayPercentChangeId;
 	else if ("PCTCHG_20D" == name)	fid = &fidset.Rdm20DayPercentChangeId;
+	else if ("PCTCHG_10T" == name)	fid = &fidset.Rdm10TradingDayPercentChangeId;
+	else if ("PCTCHG_15T" == name)	fid = &fidset.Rdm15TradingDayPercentChangeId;
+	else if ("PCTCHG_20T" == name)	fid = &fidset.Rdm20TradingDayPercentChangeId;
 	else {
 		LOG(ERROR) << "Unknown \"name\" attribute value \"" << name << "\".";
 		return false;
