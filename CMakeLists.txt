@@ -6,9 +6,9 @@ cmake_minimum_required (VERSION 2.8.8)
 
 project (Gomi)
 
-set(GOMI_VERSION_MAJOR 1)
-set(GOMI_VERSION_MINOR 6)
-set(GOMI_VERSION_BUILD 11)
+set(GOMI_VERSION_MAJOR 2)
+set(GOMI_VERSION_MINOR 0)
+set(GOMI_VERSION_BUILD 12)
 
 # Net-SNMP SDK installed, tested 5.7.1.
 set(NETSNMP_ROOT D:/net-snmp-5.7.1)
@@ -89,12 +89,37 @@ set(RFA_RUNTIME_LIBRARIES
 	${RFA_LIBRARY_DIR}/RFA7_RSSL_Prov_Adapter100_x64.dll
 )
 
+# ZeroMQ SDK 2.2.0
+set(ZEROMQ_ROOT "C:/Program Files/ZeroMQ 2.2.0")
+set(ZEROMQ_INCLUDE_DIRS "${ZEROMQ_ROOT}/include")
+set(ZEROMQ_LIBRARY_DIRS "${ZEROMQ_ROOT}/lib")
+set(ZEROMQ_LIBRARIES
+	optimized libzmq-v100-mt.lib
+	debug libzmq-v100-mt-gd.lib
+)
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+	set(ZEROMQ_RUNTIME_LIBRARIES "${ZEROMQ_ROOT}/bin/libzmq-v100-mt-gd.dll")
+else (CMAKE_BUILD_TYPE STREQUAL "Debug")
+	set(ZEROMQ_RUNTIME_LIBRARIES "${ZEROMQ_ROOT}/bin/libzmq-v100-mt.dll")
+endif (CMAKE_BUILD_TYPE STREQUAL "Debug")
+
+# Google Protocol BUffers
+set(PROTOBUF_SRC_ROOT_FOLDER "D:/protobuf-2.4.1")
+find_package (Protobuf REQUIRED)
+
 # Boost headers plus built libraries
 set(BOOST_ROOT D:/boost_1_50_0)
 set(BOOST_LIBRARYDIR ${BOOST_ROOT}/stage/lib)
 set(Boost_USE_STATIC_LIBS ON)
 find_package (Boost 1.50 COMPONENTS chrono thread REQUIRED)
 
+# Boost Atomics
+set(Boost_INCLUDE_DIRS
+	"D:/boost.atomic"
+	${Boost_INCLUDE_DIRS}
+)
+
+# Python for source generators
 find_package(PythonInterp REQUIRED)
 
 #-----------------------------------------------------------------------------
@@ -143,7 +168,9 @@ add_definitions(
 set(CMAKE_CXX_FLAGS "/EHa")
 
 #-----------------------------------------------------------------------------
-# source files
+# Generated source files
+
+PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS src/provider.proto)
 
 configure_file(
 	${CMAKE_SOURCE_DIR}/version_generator.py.in
@@ -161,6 +188,15 @@ configure_file(
 	${CMAKE_BINARY_DIR}/version.hh
 	COPYONLY
 )
+configure_file(
+	${CMAKE_SOURCE_DIR}/version.rc.in
+	${CMAKE_BINARY_DIR}/version.rc
+	@ONLY
+)
+
+#-----------------------------------------------------------------------------
+# source files
+
 set(cxx-sources
 	src/gomi_bin.cc
 	src/gomi_bar.cc
@@ -192,20 +228,18 @@ set(cxx-sources
 	${CMAKE_BINARY_DIR}/version.cc
 )
 
-configure_file(
-	${CMAKE_SOURCE_DIR}/version.rc.in
-	${CMAKE_BINARY_DIR}/version.rc
-	@ONLY
-)
 set(rc-sources
 	${CMAKE_BINARY_DIR}/version.rc
 )
 
 include_directories(
 	include
+	${CMAKE_CURRENT_BINARY_DIR}
 	${NETSNMP_INCLUDE_DIRS}
 	${VHAYU_INCLUDE_DIRS}
 	${RFA_INCLUDE_DIRS}
+	${ZEROMQ_INCLUDE_DIRS}
+	${PROTOBUF_INCLUDE_DIRS}
 	${Boost_INCLUDE_DIRS}
 )
 
@@ -213,19 +247,22 @@ link_directories(
 	${NETSNMP_LIBRARY_DIRS}
 	${VHAYU_LIBRARY_DIRS}
 	${RFA_LIBRARY_DIRS}
+	${ZEROMQ_LIBRARY_DIRS}
 	${Boost_LIBRARY_DIRS}
 )
 
 #-----------------------------------------------------------------------------
 # output
 
-add_library(Gomi SHARED ${cxx-sources} ${rc-sources})
+add_library(Gomi SHARED ${cxx-sources} ${rc-sources} ${PROTO_SRCS} ${PROTO_HDRS})
 
 target_link_libraries(Gomi
 	${NETSNMP_LIBRARIES}
 	${VHAYU_LIBRARIES}
 	${RFA_LIBRARIES}
 	${Boost_LIBRARIES}
+	${ZEROMQ_LIBRARIES}
+	${PROTOBUF_LIBRARIES}
 	ws2_32.lib
 	dbghelp.lib
 )
@@ -238,6 +275,7 @@ file(GLOB mibs "${CMAKE_CURRENT_SOURCE_DIR}/mibs/*.txt")
 
 install (TARGETS Gomi DESTINATION bin)
 install (FILES ${RFA_RUNTIME_LIBRARIES} DESTINATION bin)
+install (FILES ${ZEROMQ_RUNTIME_LIBRARIES} DESTINATION bin)
 install (FILES ${config} DESTINATION config)
 install (FILES ${mibs} DESTINATION mibs)
 
