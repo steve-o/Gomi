@@ -50,22 +50,6 @@ gomi::config_t::validate()
 			LOG(ERROR) << "Undefined publisher name for <session name=\"" << it->session_name << "\">.";
 			return false;
 		}
-		if (it->rssl_servers.empty()) {
-			LOG(ERROR) << "Undefined server list for <connection name=\"" << it->connection_name << "\">.";
-			return false;
-		}
-		if (it->application_id.empty()) {
-			LOG(ERROR) << "Undefined application ID for <session name=\"" << it->session_name << "\">.";
-			return false;
-		}
-		if (it->instance_id.empty()) {
-			LOG(ERROR) << "Undefined instance ID for <session name=\"" << it->session_name << "\">.";
-			return false;
-		}
-		if (it->user_name.empty()) {
-			LOG(ERROR) << "Undefined user name for <session name=\"" << it->session_name << "\">.";
-			return false;
-		}
 	}
 	if (monitor_name.empty()) {
 		LOG(ERROR) << "Undefined monitor name.";
@@ -81,15 +65,16 @@ gomi::config_t::validate()
 	}
 
 /* Maximum data size must be provided for buffer allocation. */
-	long value;
-
-	if (maximum_data_size.empty()) {
-		LOG(ERROR) << "Undefined maximum data size.";
+	if (0 == maximum_data_size) {
+		LOG(ERROR) << "Invalid maximum data size \"" << maximum_data_size << "\".";
 		return false;
 	}
-	value = std::atol (maximum_data_size.c_str());
-	if (value <= 0) {
-		LOG(ERROR) << "Invalid maximum data size \"" << maximum_data_size << "\".";
+	if (0 == session_capacity) {
+		LOG(ERROR) << "Invalid session capacity \"" << session_capacity << "\".";
+		return false;
+	}
+	if (0 == worker_count) {
+		LOG(ERROR) << "Invalid worker count \"" << worker_count << "\".";
 		return false;
 	}
 
@@ -302,7 +287,12 @@ gomi::config_t::parseRfaNode (
 /* maximumDataSize="bytes" */
 	attr = xml.transcode (elem->getAttribute (L"maximumDataSize"));
 	if (!attr.empty())
-		maximum_data_size = attr;
+		maximum_data_size = (size_t)std::atol (attr.c_str());
+
+/* sessionCapacity="count" */
+	attr = xml.transcode (elem->getAttribute (L"sessionCapacity"));
+	if (!attr.empty())
+		session_capacity = (unsigned)std::atol (attr.c_str());
 
 /* <service> */
 	nodeList = elem->getElementsByTagName (L"service");
@@ -411,17 +401,6 @@ gomi::config_t::parseSessionNode (
 	}
 	if (0 == nodeList->getLength())
 		LOG(WARNING) << "No <connection> nodes found, RFA behaviour is undefined without a server list.";
-/* <login> */
-	nodeList = elem->getElementsByTagName (L"login");
-	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseLoginNode (nodeList->item (i), session)) {
-			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
-			LOG(ERROR) << "Failed parsing <login> nth-node #" << (1 + i) << ": \"" << text_content << "\".";
-			return false;
-		}
-	}
-	if (0 == nodeList->getLength())
-		LOG(WARNING) << "No <login> nodes found in configuration.";	
 		
 	sessions.push_back (session);
 	return true;
@@ -445,57 +424,6 @@ gomi::config_t::parseConnectionNode (
 	}
 /* defaultPort="port" */
 	session.rssl_default_port = xml.transcode (elem->getAttribute (L"defaultPort"));
-
-/* <server> */
-	nodeList = elem->getElementsByTagName (L"server");
-	for (int i = 0; i < nodeList->getLength(); i++) {
-		std::string server;
-		if (!parseServerNode (nodeList->item (i), server)) {
-			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
-			LOG(ERROR) << "Failed parsing <server> nth-node #" << (1 + i) << ": \"" << text_content << "\".";			
-			return false;
-		}
-		session.rssl_servers.push_back (server);
-	}
-	if (0 == nodeList->getLength())
-		LOG(WARNING) << "No <server> nodes found, RFA behaviour is undefined without a server list.";
-
-	return true;
-}
-
-bool
-gomi::config_t::parseServerNode (
-	const DOMNode*		node,
-	std::string&		server
-	)
-{
-	const DOMElement* elem = static_cast<const DOMElement*>(node);
-	vpf::XMLStringPool xml;
-	server = xml.transcode (elem->getTextContent());
-	if (server.size() == 0) {
-		LOG(ERROR) << "Undefined hostname or IPv4 address.";
-		return false;
-	}
-	return true;
-}
-
-bool
-gomi::config_t::parseLoginNode (
-	const DOMNode*		node,
-	session_config_t&	session
-	)
-{
-	const DOMElement* elem = static_cast<const DOMElement*>(node);
-	vpf::XMLStringPool xml;
-
-/* applicationId="id" */
-	session.application_id = xml.transcode (elem->getAttribute (L"applicationId"));
-/* instanceId="id" */
-	session.instance_id = xml.transcode (elem->getAttribute (L"instanceId"));
-/* userName="name" */
-	session.user_name = xml.transcode (elem->getAttribute (L"userName"));
-/* position="..." */
-	session.position = xml.transcode (elem->getAttribute (L"position"));
 	return true;
 }
 
@@ -574,6 +502,10 @@ gomi::config_t::parseGomiNode (
 	const DOMNodeList* nodeList;
 	std::string attr;
 
+/* workerCount="threads" */
+	attr = xml.transcode (elem->getAttribute (L"workerCount"));
+	if (!attr.empty())
+		worker_count = (unsigned)std::atol (attr.c_str());
 /* interval="seconds" */
 	attr = xml.transcode (elem->getAttribute (L"interval"));
 	if (!attr.empty())

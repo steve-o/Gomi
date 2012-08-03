@@ -3,7 +3,6 @@
 
 #ifndef __RFA_HH__
 #define __RFA_HH__
-
 #pragma once
 
 #include <memory>
@@ -28,6 +27,7 @@ namespace gomi
 		~rfa_t();
 
 		bool init() throw (rfa::common::InvalidUsageException);
+		bool VerifyVersion();
 
 	private:
 

@@ -7,10 +7,9 @@
 #pragma once
 
 #include <cstdint>
-#include <map>
+#include <forward_list>
 #include <memory>
 #include <unordered_map>
-#include <tuple>
 
 /* Boost Chrono. */
 #include <boost/chrono.hpp>
@@ -21,8 +20,8 @@
 /* Boost Posix Time */
 #include <boost/date_time/posix_time/posix_time.hpp>
 
-/* Boost instrusive containers */
-#include <boost/intrusive/circular_list_algorithms.hpp>
+/* Boost unordered map: bypass 2^19 limit in MSVC std::unordered_map */
+#include <boost/unordered_map.hpp>
 
 /* Boost noncopyable base class. */
 #include <boost/utility.hpp>
@@ -72,34 +71,22 @@ namespace gomi
 
 	class rfa_t;
 	class provider_t;
+	class worker_t;
 	class snmp_agent_t;
 
 /* Archive streams match a specific bin analytic query. */
 	class archive_stream_t : public item_stream_t
 	{
 	public:
-		archive_stream_t (std::shared_ptr<bin_t> bin_) :
-			bin (bin_)
-		{
-		}
-
-		std::shared_ptr<bin_t> bin;
-	};
-
-/* Realtime streams are a set of multiple archive streams. */
-	class realtime_stream_t : public item_stream_t
-	{
-	public:
-		realtime_stream_t (const std::string& symbol_name_) :
-			symbol_name (symbol_name_)
+		archive_stream_t (const std::string& underlying_symbol_, const bin_decl_t& bin_decl_) :
+			underlying_symbol (underlying_symbol_),
+			bin_decl (bin_decl_)
 		{
 		}
 
 /* source feed name, not the name of the derived feed symbol */
-		std::string symbol_name;
-		std::vector<std::pair<fidset_t, std::shared_ptr<archive_stream_t>>> special;
-/* last 10-minute bin requires custom handling */
-		std::pair<fidset_t, std::map<bin_decl_t, std::shared_ptr<archive_stream_t>, bin_decl_openclose_compare_t>> last_10min;
+		const std::string underlying_symbol;
+		const bin_decl_t& bin_decl;
 	};
 
 	class event_pump_t
@@ -121,48 +108,16 @@ namespace gomi
 		std::shared_ptr<rfa::common::EventQueue> event_queue_;
 	};
 
-/* Periodic timer event source */
-	template<class Clock, class Duration = typename Clock::duration>
-	class time_base_t
+/* Client request event source */
+	class request_base_t
 	{
 	public:
-		virtual bool processTimer (const boost::chrono::time_point<Clock, Duration>& t) = 0;
-	};
-
-	template<class Clock, class Duration = typename Clock::duration>
-	class time_pump_t
-	{
-	public:
-		time_pump_t (const boost::chrono::time_point<Clock, Duration>& due_time, Duration td, time_base_t<Clock, Duration>* cb) :
-			due_time_ (due_time),
-			td_ (td),
-			cb_ (cb)
-		{
-			CHECK(nullptr != cb_);
-		}
-
-		void operator()()
-		{
-			try {
-				while (true) {
-					boost::this_thread::sleep_until (due_time_);
-					if (!cb_->processTimer (due_time_))
-						break;
-					due_time_ += td_;
-				}
-			} catch (boost::thread_interrupted const&) {
-				LOG(INFO) << "Timer thread interrupted.";
-			}
-		}
-
-	private:
-		boost::chrono::time_point<Clock, Duration> due_time_;
-		Duration td_;
-		time_base_t<Clock, Duration>* cb_;
+		virtual void processRefreshRequest (rfa::sessionLayer::RequestToken& token, uint32_t service_id, uint8_t model_type, const char* name, uint8_t rwf_major_version, uint8_t rwf_minor_version) = 0;
 	};
 
 	class gomi_t :
-		public time_base_t<boost::chrono::system_clock>,
+		public std::enable_shared_from_this<gomi_t>,
+		public request_base_t,
 		public vpf::AbstractUserPlugin,
 		public vpf::Command,
 		boost::noncopyable
@@ -186,8 +141,8 @@ namespace gomi
 /* Tcl entry point. */
 		virtual int execute (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData) override;
 
-/* Configured period timer entry point. */
-		bool processTimer (const boost::chrono::time_point<boost::chrono::system_clock>& t) override;
+/* Refresh request entry point. */
+		void processRefreshRequest (rfa::sessionLayer::RequestToken& token, uint32_t service_id, uint8_t model_type, const char* name, uint8_t rwf_major_version, uint8_t rwf_minor_version) override;
 
 /* Global list of all plugin instances.  AE owns pointer. */
 		static std::list<gomi_t*> global_list_;
@@ -202,22 +157,8 @@ namespace gomi
 		bool unregister_tcl_api (const char* id);
 		int tclGomiQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 		int tclFeedLogQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
-		int tclRepublishQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
-		int tclRepublishLastBinQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
-		int tclRecalculateQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 
 		bool is_special_bin (const bin_decl_t& bin);
-
-		bool get_due_time (const boost::local_time::time_zone_ptr& tz, boost::posix_time::ptime* t);
-		bool get_next_bin_close (const boost::local_time::time_zone_ptr& tz, boost::posix_time::ptime* t);
-		bool get_last_bin_close (const boost::local_time::time_zone_ptr& tz, boost::posix_time::time_duration* last_close);
-
-/* Broadcast out messages. */
-		bool timeRefresh() throw (rfa::common::InvalidUsageException);
-		bool dayRefresh() throw (rfa::common::InvalidUsageException);
-		bool Recalculate() throw (rfa::common::InvalidUsageException);
-		bool binRefresh (const bin_decl_t& bin) throw (rfa::common::InvalidUsageException);
-		bool summaryRefresh() throw (rfa::common::InvalidUsageException);
 
 /* Unique instance number per process. */
 		LONG instance_;
@@ -247,12 +188,6 @@ namespace gomi
 
 		friend Netsnmp_Next_Data_Point gomiPluginPerformanceTable_get_next_data_point;
 		friend Netsnmp_Node_Handler gomiPluginPerformanceTable_handler;
-
-		friend Netsnmp_First_Data_Point gomiSessionTable_get_first_data_point;
-		friend Netsnmp_Next_Data_Point gomiSessionTable_get_next_data_point;
-
-		friend Netsnmp_First_Data_Point gomiSessionPerformanceTable_get_first_data_point;
-		friend Netsnmp_Next_Data_Point gomiSessionPerformanceTable_get_next_data_point;
 #endif /* GOMIMIB_H */
 
 /* RFA context. */
@@ -280,12 +215,7 @@ namespace gomi
 		boost::posix_time::time_duration last_refresh_;
 
 /* Publish instruments. */
-		std::map<bin_decl_t, std::pair<std::vector<std::shared_ptr<bin_t>>,
-					       std::vector<std::shared_ptr<archive_stream_t>>>, bin_decl_openclose_compare_t> query_vector_;
-		boost::shared_mutex query_mutex_;
-		std::vector<std::shared_ptr<realtime_stream_t>> stream_vector_;
-
-/* analytic state */
+		boost::unordered_map<std::string, std::shared_ptr<archive_stream_t>> directory_;
 
 /* Event pump and thread. */
 		std::unique_ptr<event_pump_t> event_pump_;
@@ -293,13 +223,18 @@ namespace gomi
 
 /* Publish fields. */
 		rfa::data::FieldList fields_;
+		rfa::message::AttribInfo attribInfo_;
+		rfa::common::RespStatus status_;
 
 /* Iterator for populating publish fields */
 		rfa::data::SingleWriteIterator single_write_it_;
 
-/* Thread timer. */
-		std::unique_ptr<time_pump_t<boost::chrono::system_clock>> timer_;
-		std::unique_ptr<boost::thread> timer_thread_;
+/* RFA request thread workers. */
+		std::forward_list<std::pair<std::shared_ptr<worker_t>, std::shared_ptr<boost::thread>>> workers_;
+
+/* thread worker shutdown socket. */
+		std::shared_ptr<void> zmq_context_;
+		std::shared_ptr<void> abort_sock_;
 
 /** Performance Counters. **/
 		boost::posix_time::ptime last_activity_;

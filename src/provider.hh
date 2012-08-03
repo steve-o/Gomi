@@ -3,21 +3,27 @@
 
 #ifndef __PROVIDER_HH__
 #define __PROVIDER_HH__
-
 #pragma once
 
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
+#include <utility>
+
+/* Boost Atomics */
+#include <boost/atomic.hpp>
 
 /* Boost Posix Time */
 #include <boost/date_time/posix_time/posix_time.hpp>
 
-/* Boost Unordered C++11 implementation */
+/* Boost unordered map: bypass 2^19 limit in MSVC std::unordered_map */
 #include <boost/unordered_map.hpp>
 
 /* Boost noncopyable base class */
 #include <boost/utility.hpp>
+
+/* Boost threading. */
+#include <boost/thread.hpp>
 
 /* RFA 7.2 */
 #include <rfa/rfa.hh>
@@ -31,81 +37,169 @@ namespace gomi
 /* Performance Counters */
 	enum {
 		PROVIDER_PC_MSGS_SENT,
+		PROVIDER_PC_RFA_MSGS_SENT,
+		PROVIDER_PC_RFA_EVENTS_RECEIVED,
+		PROVIDER_PC_RFA_EVENTS_DISCARDED,
+		PROVIDER_PC_OMM_CMD_ERRORS,
+		PROVIDER_PC_CONNECTION_EVENTS_RECEIVED,
+		PROVIDER_PC_OMM_ACTIVE_CLIENT_SESSION_RECEIVED,
+		PROVIDER_PC_OMM_ACTIVE_CLIENT_SESSION_EXCEPTION,
+		PROVIDER_PC_CLIENT_SESSION_REJECTED,
+		PROVIDER_PC_CLIENT_SESSION_ACCEPTED,
 /* marker */
 		PROVIDER_PC_MAX
+	};
+
+	class client_t;
+	class item_stream_t;
+
+	class request_t : boost::noncopyable
+	{
+	public:
+		request_t (std::shared_ptr<item_stream_t>& item_stream_, std::shared_ptr<client_t>& client_, bool use_attribinfo_in_updates_)
+			: item_stream (item_stream_),
+			  client (client_),
+			  use_attribinfo_in_updates (use_attribinfo_in_updates_),
+			  is_muted (true)
+		{
+		}
+
+		std::weak_ptr<item_stream_t> item_stream;
+		std::weak_ptr<client_t> client;
+		const bool use_attribinfo_in_updates;	/* can theoretically change in reissue */
+		bool is_muted;				/* changes after refresh */
 	};
 
 	class item_stream_t : boost::noncopyable
 	{
 	public:
+		item_stream_t ()
+		{
+		}
+
 /* Fixed name for this stream. */
 		rfa::common::RFA_String rfa_name;
-/* Session token which is valid from login success to login close. */
-		std::vector<rfa::sessionLayer::ItemToken*> token;
+/* Request tokens for clients, can be more than one per client. */
+		boost::unordered_map<rfa::sessionLayer::RequestToken*const, std::shared_ptr<request_t>> requests;
+		boost::shared_mutex lock;
 	};
 
-	class session_t;
-
 	class provider_t :
+		public rfa::common::Client,
 		boost::noncopyable
 	{
 	public:
-		provider_t (const config_t& config, std::shared_ptr<rfa_t> rfa, std::shared_ptr<rfa::common::EventQueue> event_queue);
+		provider_t (const config_t& config, std::shared_ptr<rfa_t> rfa, std::shared_ptr<rfa::common::EventQueue> event_queue, std::shared_ptr<void> zmq_context);
 		~provider_t();
 
 		bool init() throw (rfa::common::InvalidConfigurationException, rfa::common::InvalidUsageException);
 
 		bool createItemStream (const char* name, std::shared_ptr<item_stream_t> item_stream) throw (rfa::common::InvalidUsageException);
-		bool send (item_stream_t& item_stream, rfa::common::Msg& msg) throw (rfa::common::InvalidUsageException);
+		bool send (item_stream_t& item_stream, rfa::message::RespMsg& msg, const rfa::message::AttribInfo& attribInfo) throw (rfa::common::InvalidUsageException);
+		bool send (rfa::message::RespMsg& msg, rfa::sessionLayer::RequestToken& token) throw (rfa::common::InvalidUsageException);
 
-		uint8_t getRwfMajorVersion() {
-			return min_rwf_major_version_;
+/* RFA event callback. */
+		void processEvent (const rfa::common::Event& event) override;
+
+		uint16_t getRwfVersion() const {
+			return min_rwf_version_.load();
 		}
-		uint8_t getRwfMinorVersion() {
-			return min_rwf_minor_version_;
+		const char* getServiceName() const {
+			return config_.service_name.c_str();
+		}
+		uint32_t getServiceId() const {
+			return service_id_;
 		}
 
 	private:
-		void getServiceDirectory (rfa::data::Map& map);
-		void getServiceFilterList (rfa::data::FilterList& filterList);
-		void getServiceInformation (rfa::data::ElementList& elementList);
-		void getServiceCapabilities (rfa::data::Array& capabilities);
-		void getServiceDictionaries (rfa::data::Array& dictionaries);
-#if 1
-		void getDirectoryQoS (rfa::data::Array& qos);
-#endif
-		void getServiceState (rfa::data::ElementList& elementList);
+		void processConnectionEvent (const rfa::sessionLayer::ConnectionEvent& event);
+		void processOMMActiveClientSessionEvent (const rfa::sessionLayer::OMMActiveClientSessionEvent& event);
+		void processOMMCmdErrorEvent (const rfa::sessionLayer::OMMCmdErrorEvent& event);
+
+		bool rejectClientSession (const rfa::common::Handle* handle);
+		bool acceptClientSession (const rfa::common::Handle* handle);
+		bool eraseClientSession (rfa::common::Handle* handle);
+
+		void getDirectoryResponse (rfa::message::RespMsg* msg, uint8_t rwf_major_version, uint8_t rwf_minor_version, const char* service_name, uint32_t filter_mask, uint8_t response_type);
+		void getServiceDirectory (rfa::data::Map* map, uint8_t rwf_major_version, uint8_t rwf_minor_version, const char* service_name, uint32_t filter_mask);
+		void getServiceFilterList (rfa::data::FilterList* filterList, uint8_t rwf_major_version, uint8_t rwf_minor_version, uint32_t filter_mask);
+		void getServiceInformation (rfa::data::ElementList* elementList, uint8_t rwf_major_version, uint8_t rwf_minor_version);
+		void getServiceCapabilities (rfa::data::Array* capabilities);
+		void getServiceDictionaries (rfa::data::Array* dictionaries);
+		void getServiceState (rfa::data::ElementList* elementList, uint8_t rwf_major_version, uint8_t rwf_minor_version);
+
+		uint32_t send (rfa::common::Msg& msg, rfa::sessionLayer::RequestToken& token, void* closure) throw (rfa::common::InvalidUsageException);
+		uint32_t submit (rfa::common::Msg& msg, rfa::sessionLayer::RequestToken& token, void* closure) throw (rfa::common::InvalidUsageException);
+
+		void setServiceId (uint32_t service_id) {
+			service_id_.store (service_id);
+		}
 
 		const config_t& config_;
 
-/* Reuters Wire Format versions. */
-		uint8_t min_rwf_major_version_;
-		uint8_t min_rwf_minor_version_;
+/* RFA context. */
+		std::shared_ptr<rfa_t> rfa_;
 
-		std::vector<std::unique_ptr<session_t>> sessions_;
+/* RFA asynchronous event queue. */
+		std::shared_ptr<rfa::common::EventQueue> event_queue_;
+
+/* RFA session defines one or more connections for horizontal scaling. */
+		std::unique_ptr<rfa::sessionLayer::Session, internal::release_deleter> session_;
+
+/* RFA OMM provider interface. */
+		std::unique_ptr<rfa::sessionLayer::OMMProvider, internal::destroy_deleter> omm_provider_;
+
+/* RFA Connection event consumer */
+		rfa::common::Handle* connection_item_handle_;
+/* RFA Listen event consumer */
+		rfa::common::Handle* listen_item_handle_;
+/* RFA Error Item event consumer */
+		rfa::common::Handle* error_item_handle_;
+
+/* RFA Client Session directory */
+		boost::unordered_map<rfa::common::Handle*const, std::shared_ptr<client_t>> clients_;
+		boost::shared_mutex clients_lock_;
+
+		friend client_t;
+
+/* Entire request set */
+		boost::unordered_map<rfa::sessionLayer::RequestToken*const, std::weak_ptr<request_t>> requests_;
+		boost::shared_mutex requests_lock_;
+
+/* Reuters Wire Format versions. */
+		boost::atomic_uint16_t min_rwf_version_;
+
+/* Directory mapped ServiceID */
+		boost::atomic_uint32_t service_id_;
+
+/* Pre-allocated shared resource. */
+		rfa::data::Map map_;
+		rfa::message::AttribInfo attribInfo_;
+		rfa::common::RespStatus status_;
+
+/* Iterator for populating publish fields */
+		rfa::data::SingleWriteIterator single_write_it_;
+
+/* RFA can reject new client requests whilst maintaining current connected sessions.
+ */
+		bool is_accepting_connections_;
+		bool is_accepting_requests_;
+		bool is_muted_;
 
 /* Container of all item streams keyed by symbol name. */
-// MSVC 2010 faults on insert > 250k items without resizing in ctr.
-// MSVC 2010 faults in dtr with > 250k items.
-//		std::unordered_map<std::string, std::weak_ptr<item_stream_t>> directory_;
-//		std::map<std::string, std::weak_ptr<item_stream_t>> directory_;
-		boost::unordered_map<std::string, std::weak_ptr<item_stream_t>> directory_;
+		boost::unordered_map<std::string, std::shared_ptr<item_stream_t>> directory_;
+		boost::shared_mutex directory_lock_;
 
-		friend session_t;
+/* RFA request thread client. */
+		std::shared_ptr<void> zmq_context_;
 
 /** Performance Counters **/
-		boost::posix_time::ptime last_activity_;
+		boost::posix_time::ptime creation_time_, last_activity_;
 		uint32_t cumulative_stats_[PROVIDER_PC_MAX];
 		uint32_t snap_stats_[PROVIDER_PC_MAX];
 
 #ifdef GOMIMIB_H
 		friend Netsnmp_Node_Handler gomiPluginPerformanceTable_handler;
-
-		friend Netsnmp_First_Data_Point gomiSessionTable_get_first_data_point;
-		friend Netsnmp_Next_Data_Point gomiSessionTable_get_next_data_point;
-
-		friend Netsnmp_First_Data_Point gomiSessionPerformanceTable_get_first_data_point;
-		friend Netsnmp_Next_Data_Point gomiSessionPerformanceTable_get_next_data_point;
 #endif /* GOMIMIB_H */
 	};
 

@@ -27,36 +27,8 @@ namespace gomi
 //  RFA publisher name, used for logging.
 		std::string publisher_name;
 
-//  TREP-RT ADH hostname or IP address.
-		std::vector<std::string> rssl_servers;
-
 //  Default TREP-RT RSSL port, e.g. 14002 (interactive), 14003 (non-interactive).
 		std::string rssl_default_port;
-
-/* DACS application Id.  If the server authenticates with DACS, the consumer
- * application may be required to pass in a valid ApplicationId.
- * Range: "" (None) or 1-511 as an Ascii string.
- */
-		std::string application_id;
-
-/* InstanceId is used to differentiate applications running on the same host.
- * If there is more than one noninteractive provider instance running on the
- * same host, they must be set as a different value by the provider
- * application. Otherwise, the infrastructure component which the providers
- * connect to will reject a login request that has the same InstanceId value
- * and cut the connection.
- * Range: "" (None) or any Ascii string, presumably to maximum RFA_String length.
- */
-		std::string instance_id;
-
-/* DACS username, frequently non-checked and set to similar: user1.
- */
-		std::string user_name;
-
-/* DACS position, the station which the user is using.
- * Range: "" (None) or "<IPv4 address>/hostname" or "<IPv4 address>/net"
- */
-		std::string position;
 	};
 
 	struct fidset_t
@@ -98,9 +70,7 @@ namespace gomi
 		bool parseRfaNode (const xercesc::DOMNode* node);
 		bool parseServiceNode (const xercesc::DOMNode* node);
 		bool parseConnectionNode (const xercesc::DOMNode* node, session_config_t& session);
-		bool parseServerNode (const xercesc::DOMNode* node, std::string& server);
 		bool parsePublisherNode (const xercesc::DOMNode* node, std::string& publisher);
-		bool parseLoginNode (const xercesc::DOMNode* node, session_config_t& session);
 		bool parseSessionNode (const xercesc::DOMNode* node);
 		bool parseMonitorNode (const xercesc::DOMNode* node);
 		bool parseEventQueueNode (const xercesc::DOMNode* node);
@@ -149,7 +119,13 @@ namespace gomi
 		std::string vendor_name;
 
 //  RFA maximum data buffer size for SingleWriteIterator.
-		std::string maximum_data_size;
+		size_t maximum_data_size;
+
+//  Client session capacity.
+		unsigned session_capacity;
+
+//  Count of request worker threads.
+		unsigned worker_count;
 
 //  Time quantum interval in seconds for checking bin boundaries.
 		std::string interval;
@@ -190,21 +166,7 @@ namespace gomi
 			  "\"session_name\": \"" << session.session_name << "\""
 			", \"connection_name\": \"" << session.connection_name << "\""
 			", \"publisher_name\": \"" << session.publisher_name << "\""
-			", \"rssl_servers\": [ ";
-		for (auto it = session.rssl_servers.begin();
-			it != session.rssl_servers.end();
-			++it)
-		{
-			if (it != session.rssl_servers.begin())
-				o << ", ";
-			o << '"' << *it << '"';
-		}
-		o << " ]"
 			", \"rssl_default_port\": \"" << session.rssl_default_port << "\""
-			", \"application_id\": \"" << session.application_id << "\""
-			", \"instance_id\": \"" << session.instance_id << "\""
-			", \"user_name\": \"" << session.user_name << "\""
-			", \"position\": \"" << session.position << "\""
 			" }";
 		return o;
 	}
@@ -249,7 +211,9 @@ namespace gomi
 			", \"monitor_name\": \"" << config.monitor_name << "\""
 			", \"event_queue_name\": \"" << config.event_queue_name << "\""
 			", \"vendor_name\": \"" << config.vendor_name << "\""
-			", \"maximum_data_size\": \"" << config.maximum_data_size << "\""
+			", \"maximum_data_size\": " << config.maximum_data_size <<
+			", \"session_capacity\": " << config.session_capacity << 
+			", \"worker_count\": " << config.worker_count << 
 			", \"interval\": \"" << config.interval << "\""
 			", \"tolerable_delay\": \"" << config.tolerable_delay << "\""
 			", \"suffix\": \"" << config.suffix << "\""

@@ -20,13 +20,10 @@
 #include <Data/Array.h>
 #include <Data/ArrayWriteIterator.h>
 #include <Data/ArrayEntry.h>
-#include <Data/DataDefWriteIterator.h>
 #include <Data/ElementList.h>
 #include <Data/ElementListWriteIterator.h>
 #include <Data/FieldList.h>
 #include <Data/FieldListWriteIterator.h>
-#include <Data/FieldListDef.h>
-#include <Data/FieldListDefWriteIterator.h>
 #include <Data/FilterEntry.h>
 #include <Data/FilterList.h>
 #include <Data/FilterListWriteIterator.h>
@@ -52,6 +49,14 @@
 #include <SessionLayer/OMMItemCmd.h>
 #include <SessionLayer/OMMItemEvent.h>
 #include <SessionLayer/OMMItemIntSpec.h>
+#include <SessionLayer/OMMActiveClientSessionEvent.h>
+#include <SessionLayer/OMMInactiveClientSessionEvent.h>
+#include <SessionLayer/OMMClientSessionIntSpec.h>
+#include <SessionLayer/OMMClientSessionCmd.h>
+#include <SessionLayer/OMMClientSessionListenerIntSpec.h>
+#include <SessionLayer/OMMListenerConnectionIntSpec.h>
+#include <SessionLayer/OMMSolicitedItemCmd.h>
+#include <SessionLayer/OMMSolicitedItemEvent.h>
 
 #endif /* __RFA_MISSING_HH__ */
 

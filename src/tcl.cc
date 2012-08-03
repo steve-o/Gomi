@@ -28,16 +28,10 @@ static const char* kDefaultTickVolumeField = "TickVolume";
 /* Tcl exported API. */
 static const char* kBasicFunctionName = "gomi_query";
 static const char* kFeedLogFunctionName = "gomi_feedlog";
-static const char* kRepublishFunctionName = "gomi_republish";
-static const char* kRepublishLastBinFunctionName = "gomi_republish_last_bin";
-static const char* kRecalculateFunctionName = "gomi_recalculate";
 
 static const char* kTclApi[] = {
 	kBasicFunctionName,
-	kFeedLogFunctionName,
-	kRepublishFunctionName,
-	kRepublishLastBinFunctionName,
-	kRecalculateFunctionName
+	kFeedLogFunctionName
 };
 
 /* Register Tcl API.
@@ -112,12 +106,6 @@ gomi::gomi_t::execute (
 			retval = tclGomiQuery (cmdInfo, cmdData);
 		else if (0 == strcmp (command, kFeedLogFunctionName))
 			retval = tclFeedLogQuery (cmdInfo, cmdData);
-		else if (0 == strcmp (command, kRepublishFunctionName))
-			retval = tclRepublishQuery (cmdInfo, cmdData);
-		else if (0 == strcmp (command, kRepublishLastBinFunctionName))
-			retval = tclRepublishLastBinQuery (cmdInfo, cmdData);
-		else if (0 == strcmp (command, kRecalculateFunctionName))
-			retval = tclRecalculateQuery (cmdInfo, cmdData);
 		else
 			Tcl_SetResult (interp, "unknown function", TCL_STATIC);
 	}
@@ -492,103 +480,6 @@ gomi::gomi_t::tclFeedLogQuery (
 			LOG(WARNING) << "Writing file " << feedlog_file << " failed, error code=" << GetLastError();
 		}
 	});
-	return TCL_OK;
-}
-
-/* gomi_republish
- *
- * Republish all todays analytic results.
- */
-int
-gomi::gomi_t::tclRepublishQuery (
-	const vpf::CommandInfo& cmdInfo,
-	vpf::TCLCommandData& cmdData
-	)
-{
-	TCLLibPtrs* tclStubsPtr = (TCLLibPtrs*)cmdData.mClientData;
-	Tcl_Interp* interp = cmdData.mInterp;		/* Current interpreter. */
-/* Refresh already running.  Note locking is handled outside query to enable
- * feedback to Tcl interface.
- */
-	boost::unique_lock<boost::shared_mutex> lock (query_mutex_, boost::try_to_lock_t());
-	if (!lock.owns_lock()) {
-		Tcl_SetResult (interp, "query already running", TCL_STATIC);
-		return TCL_ERROR;
-	}
-
-	try {
-		dayRefresh();
-	} catch (rfa::common::InvalidUsageException& e) {
-		LOG(ERROR) << "InvalidUsageException: { "
-			"Severity: \"" << severity_string (e.getSeverity()) << "\""
-			", Classification: \"" << classification_string (e.getClassification()) << "\""
-			", StatusText: \"" << e.getStatus().getStatusText() << "\" }";
-	}
-	return TCL_OK;
-}
-
-/* gomi_republish_last_bin
- *
- * Recalculate and publish only the last set of bin analytic results.
- */
-int
-gomi::gomi_t::tclRepublishLastBinQuery (
-	const vpf::CommandInfo& cmdInfo,
-	vpf::TCLCommandData& cmdData
-	)
-{
-	TCLLibPtrs* tclStubsPtr = (TCLLibPtrs*)cmdData.mClientData;
-	Tcl_Interp* interp = cmdData.mInterp;		/* Current interpreter. */
-/* Refresh already running.  Note locking is handled outside query to enable
- * feedback to Tcl interface.
- */
-	boost::unique_lock<boost::shared_mutex> lock (query_mutex_, boost::try_to_lock_t());
-	if (!lock.owns_lock()) {
-		Tcl_SetResult (interp, "query already running", TCL_STATIC);
-		return TCL_ERROR;
-	}
-
-	try {
-		last_refresh_ = boost::posix_time::not_a_date_time;
-		timeRefresh();
-	} catch (rfa::common::InvalidUsageException& e) {
-		LOG(ERROR) << "InvalidUsageException: { "
-			"Severity: \"" << severity_string (e.getSeverity()) << "\""
-			", Classification: \"" << classification_string (e.getClassification()) << "\""
-			", StatusText: \"" << e.getStatus().getStatusText() << "\" }";
-	}
-	return TCL_OK;
-}
-
-/* gomi_recalculate
- *
- * Calculate and not publish a full 24-hour window of analytics.
- */
-int
-gomi::gomi_t::tclRecalculateQuery (
-	const vpf::CommandInfo& cmdInfo,
-	vpf::TCLCommandData& cmdData
-	)
-{
-	TCLLibPtrs* tclStubsPtr = (TCLLibPtrs*)cmdData.mClientData;
-	Tcl_Interp* interp = cmdData.mInterp;		/* Current interpreter. */
-/* Refresh already running.  Note locking is handled outside query to enable
- * feedback to Tcl interface.
- */
-	boost::unique_lock<boost::shared_mutex> lock (query_mutex_, boost::try_to_lock_t());
-	if (!lock.owns_lock()) {
-		Tcl_SetResult (interp, "query already running", TCL_STATIC);
-		return TCL_ERROR;
-	}
-
-	try {
-		Recalculate();
-	} catch (rfa::common::InvalidUsageException& e) {
-		LOG(ERROR) << "InvalidUsageException: { "
-			"Severity: \"" << severity_string (e.getSeverity()) << "\""
-			", Classification: \"" << classification_string (e.getClassification()) << "\""
-			", StatusText: \"" << e.getStatus().getStatusText() << "\" }";
-	}
 	return TCL_OK;
 }
 

@@ -13,6 +13,9 @@
 /* Velocity Analytics Plugin Framework */
 #include <vpf/vpf.h>
 
+/* Google Protocol Buffers */
+#include <google/protobuf/stubs/common.h>
+
 #include "chromium/command_line.hh"
 #include "chromium/logging.hh"
 #include "gomi.hh"
@@ -122,6 +125,10 @@ public:
 		winsock_ (2, 2),
 		timecaps_ (1 /* ms */)
 	{
+// Verify that the version of the library that we linked against is
+// compatible with the version of the headers we compiled against.
+		GOOGLE_PROTOBUF_VERIFY_VERSION;
+
 		registerType (kPluginType);
 	}
 

@@ -48,43 +48,27 @@
      Override settings in this file with the Windows registry by setting the key name
      as a parameter, e.g.
 
-	<Rfa key="HKLM/SOFTWARE/Reuters/RFA/Gomi"
-		maximumDataSize="8192">
+	<Rfa key="HKLM/SOFTWARE/Reuters/RFA/Gomi">
 
      NB:  RFA will raise an exception and the plugin will terminate if at least one value
      is not defined underneath the key.
 
   -->
-	<Rfa>
+	<Rfa maximumDataSize="8192"
+	     sessionCapacity="2">
 
 <!-- TREP-RT service name this plugin provides, compare to IDN_RDF or IDN_SELECTFEED. -->
-		<service name="NI_VTA"/>
+		<service name="VTA"/>
 
-<!-- One or more servers may be listed.  This plugin is a non-interactive provider and uses
-     port 14003 by default compared with interactive providers that usually use port 14002.
-     As a non-interactive provider the TCP connection will be initiated by the plugin and not
-     the ADH, configure firewalls appropriately.
+<!-- This plugin is an interactive provider and uses port 14002 by default compared with non-
+     interactive providers that usually use port 14003.
+     As an-interactive provider the TCP connection will be initiated by the client.
 
   -->
-		<session name="SESSIONA">
-			<publisher name="PUBLISHERA"/>		<!-- Name used for logging. -->
-			<connection name="CONNECTIONA" defaultPort="14003">
-				<server>adh1.local</server>
+		<session name="SESSION">
+			<publisher name="PUBLISHER"/>		<!-- Name used for logging. -->
+			<connection name="CONNECTION" defaultPort="14002"/>
 			</connection>
-<!-- DACS required parameters. -->
-			<login applicationId="256"
-				instanceId="Instance1"
-				userName="user1"/>
-		</session>
-
-		<session name="SESSIONB">
-			<publisher name="PUBLISHERB"/>
-			<connection name="CONNECTIONB">
-				<server>adh2.local:14003</server>
-			</connection>
-			<login applicationId="256"
-				instanceId="Instance1"
-				userName="user1"/>
 		</session>
 
 <!-- Clutter -->
@@ -98,6 +82,7 @@
 
   -->
 	<Gomi
+		workerCount="1"
 		interval="600"
 		symbolmap="C:/Vhayu/Config/symbolmap.txt"
 		suffix="=VTA"

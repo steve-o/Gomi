@@ -206,7 +206,7 @@ set(cxx-sources
 	src/provider.cc
 	src/rfa.cc
 	src/rfa_logging.cc
-	src/session.cc
+	src/client.cc
 	src/snmp_agent.cc
 	src/tcl.cc
 	src/gomi.cc

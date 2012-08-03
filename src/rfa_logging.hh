@@ -3,10 +3,7 @@
 
 #ifndef __RFA_LOGGING_HH__
 #define __RFA_LOGGING_HH__
-
 #pragma once
-
-#include <memory>
 
 /* Boost noncopyable base class */
 #include <boost/utility.hpp>
