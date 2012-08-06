@@ -56,9 +56,10 @@ namespace gomi
 	class request_t : boost::noncopyable
 	{
 	public:
-		request_t (std::shared_ptr<item_stream_t>& item_stream_, std::shared_ptr<client_t>& client_, bool use_attribinfo_in_updates_)
+		request_t (std::shared_ptr<item_stream_t>& item_stream_, std::shared_ptr<client_t>& client_, bool is_streaming_, bool use_attribinfo_in_updates_)
 			: item_stream (item_stream_),
 			  client (client_),
+			  is_streaming (is_streaming_),
 			  use_attribinfo_in_updates (use_attribinfo_in_updates_),
 			  is_muted (true)
 		{
@@ -66,6 +67,7 @@ namespace gomi
 
 		std::weak_ptr<item_stream_t> item_stream;
 		std::weak_ptr<client_t> client;
+		const bool is_streaming;
 		const bool use_attribinfo_in_updates;	/* can theoretically change in reissue */
 		bool is_muted;				/* changes after refresh */
 	};

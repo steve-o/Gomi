@@ -176,6 +176,7 @@ gomi::provider_t::send (
 	{
 		if (request.second->is_muted || request.second->use_attribinfo_in_updates)
 			return;
+		DCHECK(request.second->is_streaming);
 		send (static_cast<rfa::common::Msg&> (msg), *(request.first), nullptr);
 		auto client = request.second->client.lock();
 		if ((bool)client) {
@@ -193,6 +194,7 @@ gomi::provider_t::send (
 		{
 			if (request.second->is_muted || !request.second->use_attribinfo_in_updates)
 				return;
+			DCHECK(request.second->is_streaming);
 			send (static_cast<rfa::common::Msg&> (msg), *(request.first), nullptr);
 			auto client = request.second->client.lock();
 			if ((bool)client) {
@@ -216,7 +218,7 @@ gomi::provider_t::send (
 	)
 {
 /* find request and iteam stream for the token */
-	boost::shared_lock<boost::shared_mutex> requests_lock (requests_lock_);
+	boost::upgrade_lock<boost::shared_mutex> requests_lock (requests_lock_);
 	auto it = requests_.find (&token);
 	if (requests_.end() == it)
 		return false;
@@ -230,14 +232,29 @@ gomi::provider_t::send (
 	if (!(bool)client)
 		return false;
 /* lock updates for this stream */
-	boost::unique_lock<boost::shared_mutex> stream_lock (stream->lock);
+	boost::upgrade_lock<boost::shared_mutex> stream_lock (stream->lock);
 /* forward refresh image */
 	send (static_cast<rfa::common::Msg&> (msg), token, nullptr);
 	cumulative_stats_[PROVIDER_PC_MSGS_SENT]++;
 	client->cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT]++;
 	client->last_activity_ = last_activity_ = boost::posix_time::second_clock::universal_time();
+	if (request->is_streaming)
+	{
 /* enable updates for this request */
-	request->is_muted = false;
+		request->is_muted = false;
+	}
+	else
+	{
+/* from providers watchlist */
+		boost::upgrade_to_unique_lock<boost::shared_mutex> unique_requests_lock (requests_lock);
+		requests_.erase (it);
+/* from items watchlist */
+		auto stream_it = stream->requests.find (&token);
+		DCHECK (stream_it != stream->requests.end());
+		boost::upgrade_to_unique_lock<boost::shared_mutex> unique_stream_lock (stream_lock);
+		stream->requests.erase (stream_it);
+/* no client watchlist for snapshot */
+	}
 /* unlock */
 	return true;
 }

@@ -82,6 +82,20 @@ namespace gomi
 			handle_ = TBPrimitives::GetSymbolHandle (symbol_name_.c_str(), 1);
 		}
 
+		bin_t (const bin_decl_t& bin_decl, const TBSymbolHandle handle, const char* last_price_field, const char* tick_volume_field) :
+			bin_decl_ (bin_decl),
+			handle_ (handle),
+			last_price_field_ (last_price_field),
+			tick_volume_field_ (tick_volume_field),
+			bars_ (bin_decl_.bin_day_count)
+		{
+			Clear();
+			char symbol[kMaxSymLength];
+			TBPrimitives::GetSymbolName (handle, symbol);
+			symbol_name_.assign (symbol);
+		}
+
+
 		void Clear() {
 			tenday_avg_pc_ = fifteenday_avg_pc_ = twentyday_avg_pc_ = 0.0;
 			tenday_avg_nonzero_pc_ = fifteenday_avg_nonzero_pc_ = twentyday_avg_nonzero_pc_ = 0.0;
@@ -94,28 +108,29 @@ namespace gomi
 /* calculate this bin for a given date /date/ */
 		bool Calculate (const boost::gregorian::date& date, FlexRecWorkAreaElement* work_area, FlexRecViewElement* view_element);
 
-		const char* GetSymbolName() { return symbol_name_.c_str(); }
-		const double GetTenDayPercentageChange() { return tenday_avg_pc_; }
-		const double GetFifteenDayPercentageChange() { return fifteenday_avg_pc_; }
-		const double GetTwentyDayPercentageChange() { return twentyday_avg_pc_; }
-		const double GetTenTradingDayPercentageChange() { return tenday_avg_nonzero_pc_; }
-		const double GetFifteenTradingDayPercentageChange() { return fifteenday_avg_nonzero_pc_; }
-		const double GetTwentyTradingDayPercentageChange() { return twentyday_avg_nonzero_pc_; }
-		const uint64_t GetAverageVolume() { return average_volume_; }
-		const uint64_t GetAverageNonZeroVolume() { return average_nonzero_volume_; }
-		const uint64_t GetTotalMoves() { return total_moves_; }
-		const uint64_t GetMaximumMoves() { return maximum_moves_; }
-		const uint64_t GetMinimumMoves() { return minimum_moves_; }
-		const uint64_t GetSmallestMoves() { return smallest_moves_; }
+		const char* GetSymbolName() const { return symbol_name_.c_str(); }
+		const TBSymbolHandle GetHandle() const { return handle_; }
+		double GetTenDayPercentageChange() const { return tenday_avg_pc_; }
+		double GetFifteenDayPercentageChange() const { return fifteenday_avg_pc_; }
+		double GetTwentyDayPercentageChange() const { return twentyday_avg_pc_; }
+		double GetTenTradingDayPercentageChange() const { return tenday_avg_nonzero_pc_; }
+		double GetFifteenTradingDayPercentageChange() const { return fifteenday_avg_nonzero_pc_; }
+		double GetTwentyTradingDayPercentageChange() const { return twentyday_avg_nonzero_pc_; }
+		uint64_t GetAverageVolume() const { return average_volume_; }
+		uint64_t GetAverageNonZeroVolume() const { return average_nonzero_volume_; }
+		uint64_t GetTotalMoves() const { return total_moves_; }
+		uint64_t GetMaximumMoves() const { return maximum_moves_; }
+		uint64_t GetMinimumMoves() const { return minimum_moves_; }
+		uint64_t GetSmallestMoves() const { return smallest_moves_; }
 
-		const boost::posix_time::ptime GetCloseTime() { return close_time_; }
+		boost::posix_time::ptime GetCloseTime() const { return close_time_; }
 
 		operator bool() const { return !is_null_; }
 
 	private:
 		const bin_decl_t&	bin_decl_;
 /* Vhayu symbol name */
-		const std::string	symbol_name_;
+		std::string		symbol_name_;
 /* TBPrimitives handle */
 		TBSymbolHandle		handle_;
 /* Vhayu field names */

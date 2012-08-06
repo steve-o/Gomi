@@ -225,6 +225,7 @@ set(cxx-sources
 	src/chromium/synchronization/lock.cc
 	src/chromium/synchronization/lock_impl_win.cc
 	src/chromium/vlog.cc
+	src/googleurl/url_parse.cc
 	${CMAKE_BINARY_DIR}/version.cc
 )
 

@@ -12,6 +12,7 @@
 #include <zmq.h>
 
 #include "chromium/logging.hh"
+#include "googleurl/url_parse.h"
 #include "error.hh"
 #include "rfaostream.hh"
 #include "provider.hh"
@@ -662,25 +663,41 @@ gomi::client_t::processItemRequest (
 			}
 			else
 			{
-/* check for item in inventory */
-				boost::shared_lock<boost::shared_mutex> directory_lock (provider_.directory_lock_);
-				auto it = provider_.directory_.find (item_name);
-				if (it == provider_.directory_.end()) {
+/* decompose request */
+				LOG(INFO) << "item name: [" << item_name << "] len: " << item_name_len;
+				url_parse::Parsed parsed;
+				url_parse::Component file_name;
+				std::string url ("vta://localhost");
+				url.append (item_name, item_name_len);
+				url_parse::ParseStandardURL (url.c_str(), static_cast<int>(url.size()), &parsed);
+				if (parsed.path.is_valid())
+					url_parse::ExtractFileName (url.c_str(), parsed.path, &file_name);
+				if (!file_name.is_valid()) {
 					cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
-					LOG(INFO) << prefix_ << "Closing request for item not found in directory.";
+					LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
 					sendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotFoundEnum);
 					return;
 				}
-				LOG(INFO) << prefix_ << "Sending refresh on request.";
+				const std::string parsed_file_name (url.c_str() + file_name.begin, file_name.len);
+/* check for item in inventory */
+				boost::shared_lock<boost::shared_mutex> directory_lock (provider_.directory_lock_);
+				auto it = provider_.directory_.find (parsed_file_name);
+				if (it == provider_.directory_.end()) {
+					cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
+					LOG(INFO) << prefix_ << "Closing request for unkown item \"" << parsed_file_name << "\".";
+					sendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotFoundEnum);
+					return;
+				}
+				LOG(INFO) << prefix_ << "Forwarding request for \"" << parsed_file_name << "\".";
 				auto& stream = it->second;
 				DCHECK ((bool)stream);
-				items_.emplace (std::make_pair (&request_token, stream));
-				auto client_request = std::make_shared<request_t> (stream, shared_from_this(), use_attribinfo_in_updates);
+				auto client_request = std::make_shared<request_t> (stream, shared_from_this(), is_streaming_request, use_attribinfo_in_updates);
 				CHECK((bool)client_request);
 				boost::unique_lock<boost::shared_mutex> requests_lock (provider_.requests_lock_);
 				boost::unique_lock<boost::shared_mutex> stream_lock (stream->lock);
-				provider_.requests_.emplace (std::make_pair (&request_token, client_request));
-				stream->requests.emplace (std::make_pair (&request_token, client_request));
+				provider_.requests_.emplace (std::make_pair (&request_token, client_request));	/* weak */
+				stream->requests.emplace (std::make_pair (&request_token, client_request));	/* strong */
+
 /* forward request to worker pool */
 				provider::Request request;
 				zmq_msg_t msg;

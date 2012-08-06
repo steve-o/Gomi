@@ -78,15 +78,15 @@ namespace gomi
 	class archive_stream_t : public item_stream_t
 	{
 	public:
-		archive_stream_t (const std::string& underlying_symbol_, const bin_decl_t& bin_decl_) :
+		archive_stream_t (const std::string& underlying_symbol_) :
 			underlying_symbol (underlying_symbol_),
-			bin_decl (bin_decl_)
+			handle (TBPrimitives::GetSymbolHandle (underlying_symbol.c_str(), 1))
 		{
 		}
 
 /* source feed name, not the name of the derived feed symbol */
 		const std::string underlying_symbol;
-		const bin_decl_t& bin_decl;
+		const TBSymbolHandle handle;
 	};
 
 	class event_pump_t

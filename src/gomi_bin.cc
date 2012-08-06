@@ -15,8 +15,9 @@ static const boost::gregorian::date kUnixEpoch (1970, 1, 1);
 
 /* Convert Posix time to Unix Epoch time.
  */
-static
-__time32_t
+template< typename TimeT >
+inline
+TimeT
 to_unix_epoch (
 	const boost::posix_time::ptime t
 	)
@@ -34,7 +35,7 @@ is_business_day (
 {
 	BusinessDayInfo bd;
 	CHECK (!d.is_not_a_date());
-	const __time32_t time32 = to_unix_epoch (boost::posix_time::ptime (d));
+	const auto time32 = to_unix_epoch<__time32_t> (boost::posix_time::ptime (d));
 	return (0 != TBPrimitives::BusinessDay (time32, &bd));
 }
 
@@ -59,8 +60,10 @@ to_time_period (
 	const local_date_time end_ldt (date, bin_decl.bin_end, bin_decl.bin_tz, local_date_time::NOT_DATE_TIME_ON_ERROR);
 	CHECK (!end_ldt.is_not_a_date_time());
 
-	time_period tp (start_ldt.utc_time(), end_ldt.utc_time());
-	return tp;
+/* end time of time period must be < close time, TREP-VA has resolution of 1
+ * second compared with Boosts higher resolution implementations so adjust here.
+ */
+	return time_period (start_ldt.utc_time(), end_ldt.utc_time() - seconds (1));
 }
 
 /*  IN: bin populated with symbol names.
@@ -95,9 +98,7 @@ gomi::bin_t::Calculate (
 
 /* do not assume today is a business day */
 	using namespace boost::local_time;
-	const auto& now_in_tz = local_sec_clock::local_time (bin_decl_.bin_tz);
-	const auto& today_in_tz = now_in_tz.local_time().date();
-	auto start_date (today_in_tz);
+	auto start_date (date);
 	while (!is_business_day (start_date))
 		start_date -= boost::gregorian::date_duration (1);
 	vhayu::business_day_iterator bd_itr (start_date);

@@ -19,6 +19,8 @@
 #include "chromium/file_util.hh"
 #include "chromium/logging.hh"
 #include "chromium/string_split.hh"
+#include "googleurl/url_parse.h"
+#include "business_day_iterator.hh"
 #include "gomi_bin.hh"
 #include "snmp_agent.hh"
 #include "error.hh"
@@ -48,6 +50,17 @@ static const uint32_t kQuoteId = 40002;
 static const char* kDefaultLastPriceField = "LastPrice";
 static const char* kDefaultTickVolumeField = "TickVolume";
 
+/* RIC request fields. */
+static const char* kOpen     = "open";
+static const char* kClose    = "close";
+static const char* kTimezone = "tz";
+static const char* kOffset   = "offset";
+static const char* kDays     = "days";
+
+/* Request limits */
+static const unsigned kMaximumDayOffset = 90;
+static const unsigned kMaximumDayCount  = 90;
+
 /* http://en.wikipedia.org/wiki/Unix_epoch */
 static const boost::gregorian::date kUnixEpoch (1970, 1, 1);
 
@@ -68,6 +81,20 @@ to_unix_epoch (
 	)
 {
 	return (t - boost::posix_time::ptime (kUnixEpoch)).total_seconds();
+}
+
+/* Is today<date> a business day, per TBSDK.  Assumes local calendar as per TBSDK.
+ */
+static
+bool
+is_business_day (
+	const boost::gregorian::date d
+	)
+{
+	BusinessDayInfo bd;
+	CHECK (!d.is_not_a_date());
+	const auto time32 = to_unix_epoch<__time32_t> (boost::posix_time::ptime (d));
+	return (0 != TBPrimitives::BusinessDay (time32, &bd));
 }
 
 /* parse from /bin/ decls formatted as <name>=<start>-<end>, e.g. "OPEN=09:00-09:33"
@@ -395,21 +422,13 @@ gomi::gomi_t::init()
 			return false;
 
 /* Create state for published instruments: For every instrument, e.g. MSFT.O
- *	Realtime RIC: MSFT.O<suffix>
- *	Archive RICs: MSFT.O.<bin><suffix>
- *      History RICs: MSFT.O.<bin><time offset><suffix>
  */
-/* archive bins */
 		std::for_each (symbolmap.begin(), symbolmap.end(), [&](const std::string& symbol) {
-			std::for_each (bins_.begin(), bins_.end(), [&](const bin_decl_t& bin_decl) {
-				std::ostringstream ss;
-				ss << symbol << '.' << bin_decl.bin_name << config_.suffix;
-				auto stream = std::make_shared<archive_stream_t> (symbol, bin_decl);
-				CHECK ((bool)stream);
-				bool status = provider_->createItemStream (ss.str().c_str(), stream);
-				CHECK (status);
-				directory_.emplace (std::make_pair (ss.str(), std::move (stream)));
-			});
+			auto stream = std::make_shared<archive_stream_t> (symbol);
+			CHECK ((bool)stream);
+			bool status = provider_->createItemStream (symbol.c_str(), stream);
+			CHECK (status);
+			directory_.emplace (std::make_pair (symbol, std::move (stream)));
 		});
 
 /* Pre-allocate memory buffer for payload iterator */
@@ -596,28 +615,99 @@ gomi::gomi_t::processRefreshRequest (
 	CHECK(model_type == rfa::rdm::MMT_MARKET_PRICE);
 
 	try {
-/* find bin in directory */
-		auto directory_it = directory_.find (name_c);
-		CHECK (directory_.end() != directory_it);
-		auto& stream = directory_it->second;
+/* derived symbol name */
+		const RFA_String stream_name (name_c, 0, true);
 
-/* run analytic on bin */
-		bin_decl_t bin_decl (stream->bin_decl);
+/* decompose request */
+		url_parse::Parsed parsed;
+		url_parse::Component file_name;
+		std::string url ("vta://localhost");
+		url.append (name_c, strlen (name_c));
+		url_parse::ParseStandardURL (url.c_str(), static_cast<int>(url.size()), &parsed);
+		DCHECK(parsed.path.is_valid());
+		url_parse::ExtractFileName (url.c_str(), parsed.path, &file_name);
+		DCHECK(file_name.is_valid());
+		const std::string item_name (url.c_str() + file_name.begin, file_name.len);
+
+/* bin defaults */
+		unsigned day_offset = 0;
+		bin_decl_t bin_decl;
 		bin_decl.bin_tz = TZ_;
 		bin_decl.bin_day_count = std::stoi (config_.day_count);
+		if (parsed.query.is_valid()) {
+			url_parse::Component query = parsed.query;
+			url_parse::Component key, value;
+			while (url_parse::ExtractQueryKeyValue (url.c_str(), &query, &key, &value)) {
+				if (key.len == strlen (kOpen) && !strncmp (url.c_str() + key.begin, kOpen, key.len))
+				{
+					std::stringstream ss (std::string (url.c_str() + value.begin, value.len));
+					boost::posix_time::time_duration td;
+					if (ss >> td)
+						bin_decl.bin_start = td;
+				}
+				else if (key.len == strlen (kClose) && !strncmp (url.c_str() + key.begin, kClose, key.len))
+				{
+					std::stringstream ss (std::string (url.c_str() + value.begin, value.len));
+					boost::posix_time::time_duration td;
+					if (ss >> td)
+						bin_decl.bin_end = td;
+				}
+				else if (key.len == strlen (kTimezone) && !strncmp (url.c_str() + key.begin, kTimezone, key.len))
+				{
+					const std::string value (url.c_str() + value.begin, value.len);					
+					boost::local_time::time_zone_ptr tz = tzdb_.time_zone_from_region (value);
+					if (nullptr != tz)
+						bin_decl.bin_tz = tz;
+				}
+				else if (key.len == strlen (kOffset) && !strncmp (url.c_str() + key.begin, kOffset, key.len))
+				{
+					const std::string value (url.c_str() + value.begin, value.len);
+					unsigned offset = (unsigned)std::atol (value.c_str());
+/* cap request */
+					day_offset = (offset < kMaximumDayOffset) ? offset : kMaximumDayOffset;
+				}
+				else if (key.len == strlen (kDays) && !strncmp (url.c_str() + key.begin, kDays, key.len))
+				{
+					const std::string value (url.c_str() + value.begin, value.len);
+					unsigned count = (unsigned)std::atol (value.c_str());
+/* cap request */
+					bin_decl.bin_day_count = (count < kMaximumDayCount) ? count : kMaximumDayCount;
+				}
+			}
+		}
+
+/* run analytic on bin */
 		LOG(INFO) << "Processing bin: " << bin_decl;
 
 /* start of bin */
 		using namespace boost::local_time;
 		const auto now_in_tz = local_sec_clock::local_time (bin_decl.bin_tz);
 		const auto today_in_tz = now_in_tz.local_time().date();
+		auto start_date (today_in_tz);
+		if (day_offset > 0) {
+			LOG(INFO) << "date: " << to_simple_string (start_date);
+			while (!is_business_day (start_date))
+				start_date -= boost::gregorian::date_duration (1);
+			vhayu::business_day_iterator bd_itr (start_date);
+			LOG(INFO) << "offset: " << day_offset;
+			for (unsigned offset = day_offset; offset > 0; --offset) {
+				--bd_itr;
+				LOG(INFO) << "date: " << to_simple_string (*bd_itr);
+			}
+			start_date = *bd_itr;
+			LOG(INFO) << "date: " << to_simple_string (start_date);
+		}
+
+/* TREP-VA cached symbol handle */
+		auto directory_it = directory_.find (item_name);
+		DCHECK(directory_.end() != directory_it);
 
 /* TREP-VA workspace */
 		auto work_area = work_area_.get();
-		auto view_element = view_element_.get();	
+		auto view_element = view_element_.get();
 
-		bin_t bin (bin_decl, stream->underlying_symbol.c_str(), kDefaultLastPriceField, kDefaultTickVolumeField);
-		bin.Calculate (today_in_tz, work_area, view_element);
+		bin_t bin (bin_decl, directory_it->second->handle, kDefaultLastPriceField, kDefaultTickVolumeField);
+		bin.Calculate (start_date, work_area, view_element);
 		LOG(INFO) << "Processing complete.";
 
 /** publish analytic results **/
@@ -628,7 +718,7 @@ gomi::gomi_t::processRefreshRequest (
 		attribInfo_.clear();
 		attribInfo_.setNameType (rfa::rdm::INSTRUMENT_NAME_RIC);
 		attribInfo_.setServiceID (service_id);
-		attribInfo_.setName (stream->rfa_name);
+		attribInfo_.setName (stream_name);
 		response.setAttribInfo (attribInfo_);
 
 /* 7.4.8.3 Set the message model type of the response. */
