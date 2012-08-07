@@ -163,47 +163,40 @@ ReadSymbolMap (
 class gomi::worker_t
 {
 public:
-	worker_t (gomi_t& gomi, std::shared_ptr<void>& context, unsigned id) :
-		gomi_ (gomi),
+	worker_t (
+		std::shared_ptr<provider_t> provider,
+		const boost::unordered_map<std::string, std::shared_ptr<archive_stream_t>>& directory,
+		const boost::local_time::tz_database& tzdb,
+		const boost::local_time::time_zone_ptr TZ,
+		const config_t& config,
+		std::shared_ptr<void>& context,
+		unsigned id
+	) :
+		id_ (id),
 		context_ (context),
-		id_ (id)
+		manager_ (nullptr),
+		response_ (false),	/* reference */
+		provider_ (provider),
+		directory_ (directory),
+		tzdb_ (tzdb),
+		TZ_ (TZ),
+		config_ (config)
 	{
 	}
 
 	void operator()()
 	{
 		provider::Request request;
-		zmq_msg_t msg;
-		int rc;
 
-		std::function<int(void*)> zmq_close_deleter = zmq_close;
-/* Socket to receive refresh requests on. */
-		std::shared_ptr<void> receiver;
-		receiver.reset (zmq_socket (context_.get(), ZMQ_PULL), zmq_close_deleter);
-		CHECK((bool)receiver);
-		rc = zmq_bind (receiver.get(), "inproc://gomi/refresh");
-		CHECK(0 == rc);
-/* Also bind for terminating interrupt. */
-		rc = zmq_connect (receiver.get(), "inproc://gomi/abort");
-		CHECK(0 == rc);
-
+		Init();
 		LOG(INFO) << "Thread #" << id_ << ": Accepting refresh requests.";
 
-		while (true) {
-/* Receive new request. */
-			rc = zmq_msg_init (&msg);
-			CHECK(0 == rc);
-			LOG(INFO) << "Thread #" << id_ << ": Awaiting new job.";
-			rc = zmq_recv (receiver.get(), &msg, 0);
-			CHECK(0 == rc);
-			if (!request.ParseFromArray (zmq_msg_data (&msg), (int)zmq_msg_size (&msg))) {
-				LOG(ERROR) << "Thread #" << id_ << ": Received invalid request.";
-				rc = zmq_msg_close (&msg);
-				CHECK(0 == rc);
+		while (true)
+		{
+			if (!GetRequest (&request))
 				continue;
-			}
 			if (request.msg_type() == provider::Request::MSG_ABORT) {
-				LOG(ERROR) << "Thread #" << id_ << ": Received interrupt request.";
+				LOG(INFO) << "Thread #" << id_ << ": Received interrupt request.";
 				break;
 			}
 			if (!(request.msg_type() == provider::Request::MSG_REFRESH
@@ -214,32 +207,412 @@ public:
 			}
 			LOG(INFO) << "Thread #" << id_ << ": Received request \"" << request.refresh().item_name() << "\"";
 			LOG(INFO) << request.DebugString();
-			rc = zmq_msg_close (&msg);
-			CHECK(0 == rc);
 
+			try {
 /* forward to main application */
-			rfa::sessionLayer::RequestToken* request_token = reinterpret_cast<rfa::sessionLayer::RequestToken*> ((uintptr_t)request.refresh().token());
-			const uint32_t service_id = request.refresh().service_id();
-			const uint8_t model_type = request.refresh().model_type();
-			const char* name_c = request.refresh().item_name().c_str();
-			const uint8_t rwf_major_version = request.refresh().rwf_major_version();
-			const uint8_t rwf_minor_version = request.refresh().rwf_minor_version();
-			gomi_.processRefreshRequest (*request_token, service_id, model_type, name_c, rwf_major_version, rwf_minor_version);
+				rfa::sessionLayer::RequestToken* request_token = reinterpret_cast<rfa::sessionLayer::RequestToken*> ((uintptr_t)request.refresh().token());
+				const uint32_t service_id = request.refresh().service_id();
+				const uint8_t model_type = request.refresh().model_type();
+				const char* name_c = request.refresh().item_name().c_str();
+				const uint8_t rwf_major_version = request.refresh().rwf_major_version();
+				const uint8_t rwf_minor_version = request.refresh().rwf_minor_version();
+				ProcessRequest (*request_token, service_id, model_type, name_c, rwf_major_version, rwf_minor_version);
+			} catch (std::exception& e) {
+				LOG(ERROR) << "Request::Exception: { "
+					"\"What\": \"" << e.what() << "\" }";
+			}
 		}
 
 		LOG(INFO) << "Thread #" << id_ << ": Worker closed.";
 	}
 
+	unsigned GetId() const { return id_; }
+
 protected:
+	void Init()
+	{
+		std::function<int(void*)> zmq_close_deleter = zmq_close;
+		int rc;
+
+		try {
+/* Setup 0mq sockets */
+			receiver_.reset (zmq_socket (context_.get(), ZMQ_PULL), zmq_close_deleter);
+			CHECK((bool)receiver_);
+			rc = zmq_connect (receiver_.get(), "inproc://gomi/refresh");
+			CHECK(0 == rc);
+/* Also bind for terminating interrupt. */
+			rc = zmq_connect (receiver_.get(), "inproc://gomi/abort");
+			CHECK(0 == rc);
+		} catch (std::exception& e) {
+			LOG(ERROR) << "ZeroMQ::Exception: { "
+				"\"What\": \"" << e.what() << "\" }";
+		}
+
+		try {
+/* Pre-allocate memory buffer for RFA payload iterator */
+			fields_ = std::make_shared<rfa::data::FieldList> ();
+			CHECK ((bool)fields_);
+
+			CHECK (config_.maximum_data_size > 0);
+			single_write_it_ = std::make_shared<rfa::data::SingleWriteIterator> ();
+			CHECK ((bool)single_write_it_);
+			single_write_it_->initialize (*fields_.get(), config_.maximum_data_size);
+			CHECK (single_write_it_->isInitialized());
+		} catch (rfa::common::InvalidUsageException& e) {
+			LOG(ERROR) << "InvalidUsageException: { "
+				  "\"Severity\": \"" << severity_string (e.getSeverity()) << "\""
+				", \"Classification\": \"" << classification_string (e.getClassification()) << "\""
+				", \"StatusText\": \"" << e.getStatus().getStatusText() << "\""
+				" }";
+		}
+
+		try {
+/* FlexRecord cursor */
+			manager_ = FlexRecDefinitionManager::GetInstance (nullptr);
+			work_area_.reset (manager_->AcquireWorkArea(), [this](FlexRecWorkAreaElement* work_area){ manager_->ReleaseWorkArea (work_area); });
+			view_element_.reset (manager_->AcquireView(), [this](FlexRecViewElement* view_element){ manager_->ReleaseView (view_element); });
+
+			if (!manager_->GetView ("Trade", view_element_->view)) {
+				LOG(ERROR) << "FlexRecDefinitionManager::GetView failed";
+			}
+		} catch (std::exception& e) {
+			LOG(ERROR) << "FlexRecord::Exception: { "
+				"\"What\": \"" << e.what() << "\" }";
+		}
+	}
+
+	bool GetRequest (provider::Request* request)
+	{
+		int rc;
+
+		rc = zmq_msg_init (&msg_);
+		CHECK(0 == rc);
+		LOG(INFO) << "Thread #" << id_ << ": Awaiting new job.";
+		rc = zmq_recv (receiver_.get(), &msg_, 0);
+		CHECK(0 == rc);
+		if (!request->ParseFromArray (zmq_msg_data (&msg_), (int)zmq_msg_size (&msg_))) {
+			LOG(ERROR) << "Thread #" << id_ << ": Received invalid request.";
+			rc = zmq_msg_close (&msg_);
+			CHECK(0 == rc);
+			return false;
+		}
+		rc = zmq_msg_close (&msg_);
+		CHECK(0 == rc);
+		return true;
+	}
+
+	void ParseRIC (const char* ric, size_t ric_len, std::string* item_name, bin_decl_t* bin_decl, unsigned* day_offset)
+	{
+		url_.assign ("vta://localhost");
+		url_.append (ric, ric_len);
+		url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed_);
+		DCHECK(parsed_.path.is_valid());
+		url_parse::ExtractFileName (url_.c_str(), parsed_.path, &file_name_);
+		DCHECK(file_name_.is_valid());
+		item_name->assign (url_.c_str() + file_name_.begin, file_name_.len);
+
+		if (parsed_.query.is_valid()) {
+			url_parse::Component query = parsed_.query;
+			url_parse::Component key, value;
+			while (url_parse::ExtractQueryKeyValue (url_.c_str(), &query, &key, &value)) {
+				if (key.len == strlen (kOpen) && !strncmp (url_.c_str() + key.begin, kOpen, key.len))
+				{
+					std::stringstream ss (std::string (url_.c_str() + value.begin, value.len));
+					boost::posix_time::time_duration td;
+					if (ss >> td)
+						bin_decl->bin_start = td;
+				}
+				else if (key.len == strlen (kClose) && !strncmp (url_.c_str() + key.begin, kClose, key.len))
+				{
+					std::stringstream ss (std::string (url_.c_str() + value.begin, value.len));
+					boost::posix_time::time_duration td;
+					if (ss >> td)
+						bin_decl->bin_end = td;
+				}
+				else if (key.len == strlen (kTimezone) && !strncmp (url_.c_str() + key.begin, kTimezone, key.len))
+				{
+					const std::string value (url_.c_str() + value.begin, value.len);					
+					boost::local_time::time_zone_ptr tz = tzdb_.time_zone_from_region (value);
+					if (nullptr != tz)
+						bin_decl->bin_tz = tz;
+				}
+				else if (key.len == strlen (kOffset) && !strncmp (url_.c_str() + key.begin, kOffset, key.len))
+				{
+					const std::string value (url_.c_str() + value.begin, value.len);
+					unsigned offset = (unsigned)std::atol (value.c_str());
+/* cap request */
+					*day_offset = (offset < kMaximumDayOffset) ? offset : kMaximumDayOffset;
+				}
+				else if (key.len == strlen (kDays) && !strncmp (url_.c_str() + key.begin, kDays, key.len))
+				{
+					const std::string value (url_.c_str() + value.begin, value.len);
+					unsigned count = (unsigned)std::atol (value.c_str());
+/* cap request */
+					bin_decl->bin_day_count = (count < kMaximumDayCount) ? count : kMaximumDayCount;
+				}
+			}
+		}
+	}
+
+	void Send (
+		const bin_t& bin,
+		const RFA_String& stream_name,
+		uint8_t rwf_major_version,
+		uint8_t rwf_minor_version,
+		rfa::sessionLayer::RequestToken& token
+		)
+	{
+/* 7.4.8.1 Create a response message (4.2.2) */
+		response_.clear();
+
+/* 7.4.8.2 Create or re-use a request attribute object (4.2.4) */
+		attribInfo_.clear();
+		attribInfo_.setNameType (rfa::rdm::INSTRUMENT_NAME_RIC);
+		attribInfo_.setServiceID (provider_->getServiceId());
+		attribInfo_.setName (stream_name);
+		response_.setAttribInfo (attribInfo_);
+
+/* 7.4.8.3 Set the message model type of the response. */
+		response_.setMsgModelType (rfa::rdm::MMT_MARKET_PRICE);
+/* 7.4.8.4 Set response type, response type number, and indication mask. */
+		response_.setRespType (rfa::message::RespMsg::RefreshEnum);
+		response_.setIndicationMask ( rfa::message::RespMsg::DoNotCacheFlag
+					    | rfa::message::RespMsg::DoNotFilterFlag
+					    | rfa::message::RespMsg::RefreshCompleteFlag
+					    | rfa::message::RespMsg::DoNotRippleFlag);
+
+/* 4.3.1 RespMsg.Payload */
+// not std::map :(  derived from rfa::common::Data
+		fields_->setAssociatedMetaInfo (rwf_major_version, rwf_minor_version);
+		fields_->setInfo (kDictionaryId, kFieldListId);
+
+/* TIMEACT & ACTIV_DATE */
+		struct tm _tm;
+		__time32_t time32 = to_unix_epoch<__time32_t> (bin.GetCloseTime());
+		_gmtime32_s (&_tm, &time32);
+
+/* Clear required for SingleWriteIterator state machine. */
+		auto& it = *single_write_it_.get();
+		DCHECK (it.isInitialized());
+		it.clear();
+		it.start (*fields_.get());
+
+/* For each field set the Id via a FieldEntry bound to the iterator followed by setting the data.
+ * The iterator API provides setters for common types excluding 32-bit floats, with fallback to 
+ * a generic DataBuffer API for other types or support of pre-calculated values.
+ */
+		rfa::data::FieldEntry field (false);
+/* TIMACT */
+		field.setFieldID (kRdmTimeOfUpdateId);
+		it.bind (field);
+		it.setTime (_tm.tm_hour, _tm.tm_min, _tm.tm_sec, 0 /* ms */);
+
+/* PRICE field is a rfa::Real64 value specified as <mantissa> × 10?.
+ * Rfa deprecates setting via <double> data types so we create a mantissa from
+ * source value and consider that we publish to 6 decimal places.
+ */
+/* PCTCHG_10D */
+		field.setFieldID (config_.archive_fids.Rdm10DayPercentChangeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (bin.GetTenDayPercentageChange()), rfa::data::ExponentNeg6);
+/* PCTCHG_15D */
+		field.setFieldID (config_.archive_fids.Rdm15DayPercentChangeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (bin.GetFifteenDayPercentageChange()), rfa::data::ExponentNeg6);
+/* PCTCHG_20D */
+		field.setFieldID (config_.archive_fids.Rdm20DayPercentChangeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (bin.GetTwentyDayPercentageChange()), rfa::data::ExponentNeg6);
+/* PCTCHG_10T */
+		field.setFieldID (config_.archive_fids.Rdm10TradingDayPercentChangeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (bin.GetTenTradingDayPercentageChange()), rfa::data::ExponentNeg6);
+/* PCTCHG_15T */
+		field.setFieldID (config_.archive_fids.Rdm15TradingDayPercentChangeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (bin.GetFifteenTradingDayPercentageChange()), rfa::data::ExponentNeg6);
+/* PCTCHG_20T */
+		field.setFieldID (config_.archive_fids.Rdm20TradingDayPercentChangeId);
+		it.bind (field);
+		it.setReal (portware::mantissa (bin.GetTwentyTradingDayPercentageChange()), rfa::data::ExponentNeg6);
+/* VMA_20D */
+		field.setFieldID (config_.archive_fids.RdmAverageVolumeId);
+		it.bind (field);
+		it.setReal (bin.GetAverageVolume(), rfa::data::Exponent0);
+/* VMA_20TD */
+		field.setFieldID (config_.archive_fids.RdmAverageNonZeroVolumeId);
+		it.bind (field);
+		it.setReal (bin.GetAverageNonZeroVolume(), rfa::data::Exponent0);
+/* TRDCNT_20D */
+		field.setFieldID (config_.archive_fids.RdmTotalMovesId);
+		it.bind (field);
+		it.setReal (bin.GetTotalMoves(), rfa::data::Exponent0);
+/* HICNT_20D */
+		field.setFieldID (config_.archive_fids.RdmMaximumMovesId);
+		it.bind (field);
+		it.setReal (bin.GetMaximumMoves(), rfa::data::Exponent0);
+/* LOCNT_20D */
+		field.setFieldID (config_.archive_fids.RdmMinimumMovesId);
+		it.bind (field);
+		it.setReal (bin.GetMinimumMoves(), rfa::data::Exponent0);
+/* SMCNT_20D */
+		field.setFieldID (config_.archive_fids.RdmSmallestMovesId);
+		it.bind (field);
+		it.setReal (bin.GetSmallestMoves(), rfa::data::Exponent0);
+/* ACTIV_DATE */
+		field.setFieldID (kRdmActiveDateId);
+		it.bind (field);
+		const uint16_t year  = /* rfa(yyyy) */ 1900 + _tm.tm_year /* tm(yyyy-1900 */;
+		const uint8_t  month = /* rfa(1-12) */    1 + _tm.tm_mon  /* tm(0-11) */;
+		const uint8_t  day   = /* rfa(1-31) */        _tm.tm_mday /* tm(1-31) */;
+		it.setDate (year, month, day);
+
+		it.complete();
+		response_.setPayload (*fields_.get());
+
+/** Optional: but require to replace stale values in cache when stale values are supported. **/
+		status_.clear();
+/* Item interaction state: Open, Closed, ClosedRecover, Redirected, NonStreaming, or Unspecified. */
+		status_.setStreamState (rfa::common::RespStatus::NonStreamingEnum);
+/* Data quality state: Ok, Suspect, or Unspecified. */
+		status_.setDataState (rfa::common::RespStatus::OkEnum);
+		response_.setRespStatus (status_);
+
+#ifdef DEBUG
+/* 4.2.8 Message Validation.  RFA provides an interface to verify that
+ * constructed messages of these types conform to the Reuters Domain
+ * Models as specified in RFA API 7 RDM Usage Guide.
+ */
+		uint8_t validation_status = rfa::message::MsgValidationError;
+		try {
+			RFA_String warningText;
+			validation_status = response.validateMsg (&warningText);
+			if (rfa::message::MsgValidationWarning == validation_status)
+				LOG(ERROR) << prefix_ << "validateMsg: { \"warningText\": \"" << warningText << "\" }";
+		} catch (rfa::common::InvalidUsageException& e) {
+			LOG(ERROR) << "InvalidUsageException: { " <<
+					   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
+					", " << response_ <<
+				      " }";
+		}
+#endif
+		provider_->send (response_, token);
+		LOG(INFO) << "Response sent.";
+	}
+
+	void ProcessRequest (
+		rfa::sessionLayer::RequestToken& request_token,
+		uint32_t service_id,
+		uint8_t model_type,
+		const char* name_c,
+		uint8_t rwf_major_version,
+		uint8_t rwf_minor_version
+		)
+	{
+		VLOG(2) << "Bin request: { "
+			  "\"RequestToken\": \"" << (intptr_t)&request_token << "\""
+			", \"ServiceID\": " << service_id <<
+			", \"MsgModelType\": " << (int)model_type <<
+			", \"Name\": \"" << name_c << "\""
+			", \"RwfMajorVersion\": " << (int)rwf_major_version <<
+			", \"RwfMinorVersion\": " << (int)rwf_minor_version <<
+			" }";
+
+		DCHECK(service_id == provider_->getServiceId());
+		DCHECK(model_type == rfa::rdm::MMT_MARKET_PRICE);
+
+/* derived symbol name */
+		const RFA_String stream_name (name_c, 0, false);
+
+/* decompose request */
+		std::string item_name;
+		bin_decl_t bin_decl;
+		unsigned day_offset = 0;
+
+		bin_decl.bin_tz = TZ_;
+		bin_decl.bin_day_count = std::stoi (config_.day_count);
+		ParseRIC (name_c, strlen (name_c), &item_name, &bin_decl, &day_offset);
+
+/* start of bin */
+		using namespace boost::local_time;
+		const auto now_in_tz = local_sec_clock::local_time (bin_decl.bin_tz);
+		const auto today_in_tz = now_in_tz.local_time().date();
+		auto start_date (today_in_tz);
+		if (day_offset > 0) {
+			while (!is_business_day (start_date))
+				start_date -= boost::gregorian::date_duration (1);
+			vhayu::business_day_iterator bd_itr (start_date);
+			for (unsigned offset = day_offset; offset > 0; --offset)
+				--bd_itr;
+			start_date = *bd_itr;
+		}
+
+/* TREP-VA cached symbol handle */
+		auto directory_it = directory_.find (item_name);
+		DCHECK(directory_.end() != directory_it);
+
+/* run analytic on bin and send result */
+		try {
+			bin_t bin (bin_decl, directory_it->second->handle, kDefaultLastPriceField, kDefaultTickVolumeField);
+			LOG(INFO) << "Processing bin: " << bin_decl;
+			bin.Calculate (start_date, work_area_.get(), view_element_.get());
+			Send (bin, stream_name, rwf_major_version, rwf_minor_version, request_token);
+		} catch (rfa::common::InvalidUsageException& e) {
+			LOG(ERROR) << "InvalidUsageException: { " <<
+					"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
+					" }";
+		} catch (std::exception& e) {
+			LOG(ERROR) << "Calculate::Exception: { "
+					"\"What\": \"" << e.what() << "\""
+					" }";
+		}
+		LOG(INFO) << "Request complete.";
+	}
+
+/* worker unique identifier */
 	const unsigned id_;
+
+/* 0mq context */
 	std::shared_ptr<void> context_;
-	gomi_t& gomi_;
+
+/* Socket to receive refresh requests on. */
+	std::shared_ptr<void> receiver_;
+
+/* Incoming 0mq message */
+	zmq_msg_t msg_;
+
+/* RIC decomposition */
+	url_parse::Parsed parsed_;
+	url_parse::Component file_name_;
+	std::string url_;
+
+/* FLexRecord cursor */
+	FlexRecDefinitionManager* manager_;
+	std::shared_ptr<FlexRecWorkAreaElement> work_area_;
+	std::shared_ptr<FlexRecViewElement> view_element_;
+
+/* Outgoing rfa message */
+	rfa::message::RespMsg response_;
+
+/* Publish fields. */
+	std::shared_ptr<rfa::data::FieldList> fields_;	/* no copy ctor */
+	rfa::message::AttribInfo attribInfo_;
+	rfa::common::RespStatus status_;
+
+/* Iterator for populating publish fields */
+	std::shared_ptr<rfa::data::SingleWriteIterator> single_write_it_;	/* no copy ctor */
+
+/* application reference */
+	std::shared_ptr<provider_t> provider_;
+	const boost::unordered_map<std::string, std::shared_ptr<archive_stream_t>>& directory_;
+	const boost::local_time::tz_database& tzdb_;
+	const boost::local_time::time_zone_ptr TZ_;
+	const config_t& config_;
 };
 
 gomi::gomi_t::gomi_t()
 	:
 	is_shutdown_ (false),
-	manager_ (nullptr),
 	last_refresh_ (boost::posix_time::not_a_date_time),
 	last_activity_ (boost::posix_time::microsec_clock::universal_time()),
 	min_tcl_time_ (boost::posix_time::pos_infin),
@@ -334,22 +707,6 @@ gomi::gomi_t::init()
 		return false;
 	}
 
-	try {
-/* FlexRecord cursor */
-		manager_ = FlexRecDefinitionManager::GetInstance (nullptr);
-		work_area_.reset (manager_->AcquireWorkArea(), [this](FlexRecWorkAreaElement* work_area){ manager_->ReleaseWorkArea (work_area); });
-		view_element_.reset (manager_->AcquireView(), [this](FlexRecViewElement* view_element){ manager_->ReleaseView (view_element); });
-
-		if (!manager_->GetView ("Trade", view_element_->view)) {
-			LOG(ERROR) << "FlexRecDefinitionManager::GetView failed";
-			return false;
-		}
-	} catch (std::exception& e) {
-		LOG(ERROR) << "FlexRecord::Exception: { "
-			"\"What\": \"" << e.what() << "\" }";
-		return false;
-	}
-
 /* Boost time zone database. */
 	try {
 		tzdb_.load_from_file (config_.tzdb);
@@ -430,14 +787,6 @@ gomi::gomi_t::init()
 			CHECK (status);
 			directory_.emplace (std::make_pair (symbol, std::move (stream)));
 		});
-
-/* Pre-allocate memory buffer for payload iterator */
-		CHECK (config_.maximum_data_size > 0);
-		single_write_it_.initialize (fields_, config_.maximum_data_size);
-		CHECK (single_write_it_.isInitialized());
-
-/* daily bar archives */
-/* pre-allocate each day storage */
 	} catch (rfa::common::InvalidUsageException& e) {
 		LOG(ERROR) << "InvalidUsageException: { "
 			  "\"Severity\": \"" << severity_string (e.getSeverity()) << "\""
@@ -471,7 +820,7 @@ gomi::gomi_t::init()
 		for (size_t i = 0; i < config_.worker_count; ++i) {
 			const unsigned worker_id = (unsigned)(1 + i);
 			LOG(INFO) << "Spawning worker #" << worker_id;
-			auto worker = std::make_shared<worker_t> (*this, zmq_context_, worker_id);
+			auto worker = std::make_shared<worker_t> (provider_, directory_, tzdb_, TZ_, config_, zmq_context_, worker_id);
 			if (!(bool)worker)
 				return false;
 			auto thread = std::make_shared<boost::thread> (*worker.get());
@@ -532,18 +881,28 @@ gomi::gomi_t::clear()
 {
 /* Interrupt worker threads. */
 	if (!workers_.empty()) {
-		LOG(INFO) << "Sending interrupt to worker threads.";
+		LOG(INFO) << "Reviewing worker threads.";
 		provider::Request request;
 		request.set_msg_type (provider::Request::MSG_ABORT);
 		zmq_msg_t msg;
-		zmq_msg_init_size (&msg, request.ByteSize());
-		request.SerializeToArray (zmq_msg_data (&msg), (int)zmq_msg_size (&msg));
-		zmq_send (abort_sock_.get(), &msg, 0);
-		zmq_msg_close (&msg);
-		LOG(INFO) << "Awaiting worker threads to terminate.";
+		unsigned active_threads = 0;
 		for (auto it = workers_.begin(); it != workers_.end(); ++it) {
-			if ((bool)it->second) it->second->join();
-			it->first.reset();
+			if ((bool)it->second && it->second->joinable()) {
+				zmq_msg_init_size (&msg, request.ByteSize());
+				request.SerializeToArray (zmq_msg_data (&msg), (int)zmq_msg_size (&msg));
+				zmq_send (abort_sock_.get(), &msg, 0);
+				zmq_msg_close (&msg);
+				++active_threads;
+			}
+		}
+		if (active_threads > 0) {
+			LOG(INFO) << "Sending interrupt to " << active_threads << " worker threads.";
+			for (auto it = workers_.begin(); it != workers_.end(); ++it) {
+				if ((bool)it->second && it->second->joinable())
+					it->second->join();
+				LOG(INFO) << "Thread #" << it->first->GetId() << "joined.";
+				it->first.reset();
+			}
 		}
 		LOG(INFO) << "All worker threads joined.";
 	}
@@ -585,277 +944,9 @@ gomi::gomi_t::destroy()
 	clear();
 	LOG(INFO) << "Runtime summary: {"
 		    " \"tclQueryReceived\": " << cumulative_stats_[GOMI_PC_TCL_QUERY_RECEIVED] <<
-		   ", \"timerQueryReceived\": " << cumulative_stats_[GOMI_PC_TIMER_QUERY_RECEIVED] <<
 		" }";
 	LOG(INFO) << "Instance closed.";
 	vpf::AbstractUserPlugin::destroy();
-}
-
-/* Refresh request entry point. */
-void
-gomi::gomi_t::processRefreshRequest (
-	rfa::sessionLayer::RequestToken& request_token,
-	uint32_t service_id,
-	uint8_t model_type,
-	const char* name_c,
-	uint8_t rwf_major_version,
-	uint8_t rwf_minor_version
-	)
-{
-	VLOG(2) << "Refresh request: { "
-		  "\"RequestToken\": \"" << (intptr_t)&request_token << "\""
-		", \"ServiceID\": " << service_id <<
-		", \"MsgModelType\": " << (int)model_type <<
-		", \"Name\": \"" << name_c << "\""
-		", \"RwfMajorVersion\": " << (int)rwf_major_version <<
-		", \"RwfMinorVersion\": " << (int)rwf_minor_version <<
-		" }";
-
-	CHECK(service_id == provider_->getServiceId());
-	CHECK(model_type == rfa::rdm::MMT_MARKET_PRICE);
-
-	try {
-/* derived symbol name */
-		const RFA_String stream_name (name_c, 0, true);
-
-/* decompose request */
-		url_parse::Parsed parsed;
-		url_parse::Component file_name;
-		std::string url ("vta://localhost");
-		url.append (name_c, strlen (name_c));
-		url_parse::ParseStandardURL (url.c_str(), static_cast<int>(url.size()), &parsed);
-		DCHECK(parsed.path.is_valid());
-		url_parse::ExtractFileName (url.c_str(), parsed.path, &file_name);
-		DCHECK(file_name.is_valid());
-		const std::string item_name (url.c_str() + file_name.begin, file_name.len);
-
-/* bin defaults */
-		unsigned day_offset = 0;
-		bin_decl_t bin_decl;
-		bin_decl.bin_tz = TZ_;
-		bin_decl.bin_day_count = std::stoi (config_.day_count);
-		if (parsed.query.is_valid()) {
-			url_parse::Component query = parsed.query;
-			url_parse::Component key, value;
-			while (url_parse::ExtractQueryKeyValue (url.c_str(), &query, &key, &value)) {
-				if (key.len == strlen (kOpen) && !strncmp (url.c_str() + key.begin, kOpen, key.len))
-				{
-					std::stringstream ss (std::string (url.c_str() + value.begin, value.len));
-					boost::posix_time::time_duration td;
-					if (ss >> td)
-						bin_decl.bin_start = td;
-				}
-				else if (key.len == strlen (kClose) && !strncmp (url.c_str() + key.begin, kClose, key.len))
-				{
-					std::stringstream ss (std::string (url.c_str() + value.begin, value.len));
-					boost::posix_time::time_duration td;
-					if (ss >> td)
-						bin_decl.bin_end = td;
-				}
-				else if (key.len == strlen (kTimezone) && !strncmp (url.c_str() + key.begin, kTimezone, key.len))
-				{
-					const std::string value (url.c_str() + value.begin, value.len);					
-					boost::local_time::time_zone_ptr tz = tzdb_.time_zone_from_region (value);
-					if (nullptr != tz)
-						bin_decl.bin_tz = tz;
-				}
-				else if (key.len == strlen (kOffset) && !strncmp (url.c_str() + key.begin, kOffset, key.len))
-				{
-					const std::string value (url.c_str() + value.begin, value.len);
-					unsigned offset = (unsigned)std::atol (value.c_str());
-/* cap request */
-					day_offset = (offset < kMaximumDayOffset) ? offset : kMaximumDayOffset;
-				}
-				else if (key.len == strlen (kDays) && !strncmp (url.c_str() + key.begin, kDays, key.len))
-				{
-					const std::string value (url.c_str() + value.begin, value.len);
-					unsigned count = (unsigned)std::atol (value.c_str());
-/* cap request */
-					bin_decl.bin_day_count = (count < kMaximumDayCount) ? count : kMaximumDayCount;
-				}
-			}
-		}
-
-/* run analytic on bin */
-		LOG(INFO) << "Processing bin: " << bin_decl;
-
-/* start of bin */
-		using namespace boost::local_time;
-		const auto now_in_tz = local_sec_clock::local_time (bin_decl.bin_tz);
-		const auto today_in_tz = now_in_tz.local_time().date();
-		auto start_date (today_in_tz);
-		if (day_offset > 0) {
-			LOG(INFO) << "date: " << to_simple_string (start_date);
-			while (!is_business_day (start_date))
-				start_date -= boost::gregorian::date_duration (1);
-			vhayu::business_day_iterator bd_itr (start_date);
-			LOG(INFO) << "offset: " << day_offset;
-			for (unsigned offset = day_offset; offset > 0; --offset) {
-				--bd_itr;
-				LOG(INFO) << "date: " << to_simple_string (*bd_itr);
-			}
-			start_date = *bd_itr;
-			LOG(INFO) << "date: " << to_simple_string (start_date);
-		}
-
-/* TREP-VA cached symbol handle */
-		auto directory_it = directory_.find (item_name);
-		DCHECK(directory_.end() != directory_it);
-
-/* TREP-VA workspace */
-		auto work_area = work_area_.get();
-		auto view_element = view_element_.get();
-
-		bin_t bin (bin_decl, directory_it->second->handle, kDefaultLastPriceField, kDefaultTickVolumeField);
-		bin.Calculate (start_date, work_area, view_element);
-		LOG(INFO) << "Processing complete.";
-
-/** publish analytic results **/
-/* 7.4.8.1 Create a response message (4.2.2) */
-		rfa::message::RespMsg response (false);	/* reference */
-
-/* 7.4.8.2 Create or re-use a request attribute object (4.2.4) */
-		attribInfo_.clear();
-		attribInfo_.setNameType (rfa::rdm::INSTRUMENT_NAME_RIC);
-		attribInfo_.setServiceID (service_id);
-		attribInfo_.setName (stream_name);
-		response.setAttribInfo (attribInfo_);
-
-/* 7.4.8.3 Set the message model type of the response. */
-		response.setMsgModelType (model_type);
-/* 7.4.8.4 Set response type, response type number, and indication mask. */
-		response.setRespType (rfa::message::RespMsg::RefreshEnum);
-		response.setIndicationMask (  rfa::message::RespMsg::DoNotCacheFlag
-					    | rfa::message::RespMsg::DoNotFilterFlag
-					    | rfa::message::RespMsg::RefreshCompleteFlag
-					    | rfa::message::RespMsg::DoNotRippleFlag);
-
-/* 4.3.1 RespMsg.Payload */
-// not std::map :(  derived from rfa::common::Data
-		fields_.setAssociatedMetaInfo (rwf_major_version, rwf_minor_version);
-		fields_.setInfo (kDictionaryId, kFieldListId);
-
-/* TIMEACT & ACTIV_DATE */
-		struct tm _tm;
-		__time32_t time32 = to_unix_epoch<__time32_t> (bin.GetCloseTime());
-		_gmtime32_s (&_tm, &time32);
-
-/* Clear required for SingleWriteIterator state machine. */
-		auto& it = single_write_it_;
-		DCHECK (it.isInitialized());
-		it.clear();
-		it.start (fields_);
-
-/* For each field set the Id via a FieldEntry bound to the iterator followed by setting the data.
- * The iterator API provides setters for common types excluding 32-bit floats, with fallback to 
- * a generic DataBuffer API for other types or support of pre-calculated values.
- */
-		rfa::data::FieldEntry field (false);
-/* TIMACT */
-		field.setFieldID (kRdmTimeOfUpdateId);
-		it.bind (field);
-		it.setTime (_tm.tm_hour, _tm.tm_min, _tm.tm_sec, 0 /* ms */);
-
-/* PRICE field is a rfa::Real64 value specified as <mantissa> × 10?.
- * Rfa deprecates setting via <double> data types so we create a mantissa from
- * source value and consider that we publish to 6 decimal places.
- */
-/* PCTCHG_10D */
-		field.setFieldID (config_.archive_fids.Rdm10DayPercentChangeId);
-		it.bind (field);
-		it.setReal (portware::mantissa (bin.GetTenDayPercentageChange()), rfa::data::ExponentNeg6);
-/* PCTCHG_15D */
-		field.setFieldID (config_.archive_fids.Rdm15DayPercentChangeId);
-		it.bind (field);
-		it.setReal (portware::mantissa (bin.GetFifteenDayPercentageChange()), rfa::data::ExponentNeg6);
-/* PCTCHG_20D */
-		field.setFieldID (config_.archive_fids.Rdm20DayPercentChangeId);
-		it.bind (field);
-		it.setReal (portware::mantissa (bin.GetTwentyDayPercentageChange()), rfa::data::ExponentNeg6);
-/* PCTCHG_10T */
-		field.setFieldID (config_.archive_fids.Rdm10TradingDayPercentChangeId);
-		it.bind (field);
-		it.setReal (portware::mantissa (bin.GetTenTradingDayPercentageChange()), rfa::data::ExponentNeg6);
-/* PCTCHG_15T */
-		field.setFieldID (config_.archive_fids.Rdm15TradingDayPercentChangeId);
-		it.bind (field);
-		it.setReal (portware::mantissa (bin.GetFifteenTradingDayPercentageChange()), rfa::data::ExponentNeg6);
-/* PCTCHG_20T */
-		field.setFieldID (config_.archive_fids.Rdm20TradingDayPercentChangeId);
-		it.bind (field);
-		it.setReal (portware::mantissa (bin.GetTwentyTradingDayPercentageChange()), rfa::data::ExponentNeg6);
-/* VMA_20D */
-		field.setFieldID (config_.archive_fids.RdmAverageVolumeId);
-		it.bind (field);
-		it.setReal (bin.GetAverageVolume(), rfa::data::Exponent0);
-/* VMA_20TD */
-		field.setFieldID (config_.archive_fids.RdmAverageNonZeroVolumeId);
-		it.bind (field);
-		it.setReal (bin.GetAverageNonZeroVolume(), rfa::data::Exponent0);
-/* TRDCNT_20D */
-		field.setFieldID (config_.archive_fids.RdmTotalMovesId);
-		it.bind (field);
-		it.setReal (bin.GetTotalMoves(), rfa::data::Exponent0);
-/* HICNT_20D */
-		field.setFieldID (config_.archive_fids.RdmMaximumMovesId);
-		it.bind (field);
-		it.setReal (bin.GetMaximumMoves(), rfa::data::Exponent0);
-/* LOCNT_20D */
-		field.setFieldID (config_.archive_fids.RdmMinimumMovesId);
-		it.bind (field);
-		it.setReal (bin.GetMinimumMoves(), rfa::data::Exponent0);
-/* SMCNT_20D */
-		field.setFieldID (config_.archive_fids.RdmSmallestMovesId);
-		it.bind (field);
-		it.setReal (bin.GetSmallestMoves(), rfa::data::Exponent0);
-/* ACTIV_DATE */
-		field.setFieldID (kRdmActiveDateId);
-		it.bind (field);
-		const uint16_t year  = /* rfa(yyyy) */ 1900 + _tm.tm_year /* tm(yyyy-1900 */;
-		const uint8_t  month = /* rfa(1-12) */    1 + _tm.tm_mon  /* tm(0-11) */;
-		const uint8_t  day   = /* rfa(1-31) */        _tm.tm_mday /* tm(1-31) */;
-		it.setDate (year, month, day);
-
-		it.complete();
-		response.setPayload (fields_);
-
-/** Optional: but require to replace stale values in cache when stale values are supported. **/
-		status_.clear();
-/* Item interaction state: Open, Closed, ClosedRecover, Redirected, NonStreaming, or Unspecified. */
-		status_.setStreamState (rfa::common::RespStatus::NonStreamingEnum);
-/* Data quality state: Ok, Suspect, or Unspecified. */
-		status_.setDataState (rfa::common::RespStatus::OkEnum);
-		response.setRespStatus (status_);
-
-#ifdef DEBUG
-/* 4.2.8 Message Validation.  RFA provides an interface to verify that
- * constructed messages of these types conform to the Reuters Domain
- * Models as specified in RFA API 7 RDM Usage Guide.
- */
-		uint8_t validation_status = rfa::message::MsgValidationError;
-		try {
-			RFA_String warningText;
-			validation_status = response.validateMsg (&warningText);
-			if (rfa::message::MsgValidationWarning == validation_status)
-				LOG(ERROR) << prefix_ << "validateMsg: { \"warningText\": \"" << warningText << "\" }";
-		} catch (rfa::common::InvalidUsageException& e) {
-			LOG(ERROR) << "InvalidUsageException: { " <<
-					   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
-					", " << response <<
-				      " }";
-		}
-#endif
-		provider_->send (response, request_token);
-		LOG(INFO) << "Response sent.";
-
-	} catch (rfa::common::InvalidUsageException& e) {
-		LOG(ERROR) << "InvalidUsageException: { " <<
-				   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
-			      " }";
-	} catch (std::exception& e) {
-		LOG(ERROR) << "Refresh::Exception: { "
-			"\"What\": \"" << e.what() << "\" }";
-	}
 }
 
 /* eof */

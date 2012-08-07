@@ -57,25 +57,13 @@ gomi::client_t::~client_t()
 bool
 gomi::client_t::init (
 	rfa::common::Handle*const handle,
-	std::shared_ptr<void> zmq_context
+	std::shared_ptr<void> sender
 	)
 {
 /* save non-const client session handle. */
 	handle_ = handle;
-
-/* create new push socket for submitting refresh requests. */
-	try {
-		std::function<int(void*)> zmq_close_deleter = zmq_close;
-		sender_.reset (zmq_socket (zmq_context.get(), ZMQ_PUSH), zmq_close_deleter);
-		CHECK((bool)sender_);
-		int rc = zmq_connect (sender_.get(), "inproc://gomi/refresh");
-		CHECK(0 == rc);
-	} catch (std::exception& e) {
-		LOG(ERROR) << "ZeroMQ::Exception: { "
-			"\"What\": \"" << e.what() << "\" }";
-		return false;
-	}
-
+/* zmq send socket */
+	sender_ = sender;
 	return true;
 }
 

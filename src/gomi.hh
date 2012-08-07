@@ -61,9 +61,6 @@ namespace gomi
 /*		GOMI_PC_TCL_SVC_TIME_MIN,*/
 /*		GOMI_PC_TCL_SVC_TIME_MEAN,*/
 /*		GOMI_PC_TCL_SVC_TIME_MAX,*/
-/*		GOMI_PC_TIMER_SVC_TIME_MIN,*/
-/*		GOMI_PC_TIMER_SVC_TIME_MEAN,*/
-/*		GOMI_PC_TIMER_SVC_TIME_MAX,*/
 
 /* marker */
 		GOMI_PC_MAX
@@ -108,16 +105,7 @@ namespace gomi
 		std::shared_ptr<rfa::common::EventQueue> event_queue_;
 	};
 
-/* Client request event source */
-	class request_base_t
-	{
-	public:
-		virtual void processRefreshRequest (rfa::sessionLayer::RequestToken& token, uint32_t service_id, uint8_t model_type, const char* name, uint8_t rwf_major_version, uint8_t rwf_minor_version) = 0;
-	};
-
 	class gomi_t :
-		public std::enable_shared_from_this<gomi_t>,
-		public request_base_t,
 		public vpf::AbstractUserPlugin,
 		public vpf::Command,
 		boost::noncopyable
@@ -140,9 +128,6 @@ namespace gomi
 
 /* Tcl entry point. */
 		virtual int execute (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData) override;
-
-/* Refresh request entry point. */
-		void processRefreshRequest (rfa::sessionLayer::RequestToken& token, uint32_t service_id, uint8_t model_type, const char* name, uint8_t rwf_major_version, uint8_t rwf_minor_version) override;
 
 /* Global list of all plugin instances.  AE owns pointer. */
 		static std::list<gomi_t*> global_list_;
@@ -220,14 +205,6 @@ namespace gomi
 /* Event pump and thread. */
 		std::unique_ptr<event_pump_t> event_pump_;
 		std::unique_ptr<boost::thread> event_thread_;
-
-/* Publish fields. */
-		rfa::data::FieldList fields_;
-		rfa::message::AttribInfo attribInfo_;
-		rfa::common::RespStatus status_;
-
-/* Iterator for populating publish fields */
-		rfa::data::SingleWriteIterator single_write_it_;
 
 /* RFA request thread workers. */
 		std::forward_list<std::pair<std::shared_ptr<worker_t>, std::shared_ptr<boost::thread>>> workers_;

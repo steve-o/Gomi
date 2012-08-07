@@ -88,7 +88,7 @@ namespace gomi
 /* RFA event callback. */
 		void processEvent (const rfa::common::Event& event);
 
-		bool init (rfa::common::Handle*const handle, std::shared_ptr<void> zmq_context);
+		bool init (rfa::common::Handle*const handle, std::shared_ptr<void> sender);
 		rfa::common::Handle*const getHandle() const {
 			return handle_;
 		}
