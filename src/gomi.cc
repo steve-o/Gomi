@@ -189,7 +189,7 @@ public:
 		provider::Request request;
 
 		Init();
-		LOG(INFO) << "Thread #" << id_ << ": Accepting refresh requests.";
+		LOG(INFO) << "Thread #" << id_ << ": Accepting requests.";
 
 		while (true)
 		{
@@ -205,8 +205,8 @@ public:
 				LOG(ERROR) << "Thread #" << id_ << ": Received unknown request.";
 				continue;
 			}
-			LOG(INFO) << "Thread #" << id_ << ": Received request \"" << request.refresh().item_name() << "\"";
-			LOG(INFO) << request.DebugString();
+			VLOG(1) << "Thread #" << id_ << ": Received request \"" << request.refresh().item_name() << "\"";
+			DVLOG(1) << request.DebugString();
 
 			try {
 /* forward to main application */
@@ -287,7 +287,7 @@ protected:
 
 		rc = zmq_msg_init (&msg_);
 		CHECK(0 == rc);
-		LOG(INFO) << "Thread #" << id_ << ": Awaiting new job.";
+		VLOG(1) << "Thread #" << id_ << ": Awaiting new job.";
 		rc = zmq_recv (receiver_.get(), &msg_, 0);
 		CHECK(0 == rc);
 		if (!request->ParseFromArray (zmq_msg_data (&msg_), (int)zmq_msg_size (&msg_))) {
@@ -497,7 +497,7 @@ protected:
 		}
 #endif
 		provider_->send (response_, token);
-		LOG(INFO) << "Response sent.";
+		VLOG(3) << "Response sent.";
 	}
 
 	void ProcessRequest (
@@ -554,7 +554,7 @@ protected:
 /* run analytic on bin and send result */
 		try {
 			bin_t bin (bin_decl, directory_it->second->handle, kDefaultLastPriceField, kDefaultTickVolumeField);
-			LOG(INFO) << "Processing bin: " << bin_decl;
+			VLOG(2) << "Processing bin: " << bin_decl;
 			bin.Calculate (start_date, work_area_.get(), view_element_.get());
 			Send (bin, stream_name, rwf_major_version, rwf_minor_version, request_token);
 		} catch (rfa::common::InvalidUsageException& e) {
@@ -566,7 +566,7 @@ protected:
 					"\"What\": \"" << e.what() << "\""
 					" }";
 		}
-		LOG(INFO) << "Request complete.";
+		VLOG(2) << "Request complete.";
 	}
 
 /* worker unique identifier */

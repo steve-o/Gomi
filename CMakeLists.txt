@@ -161,7 +161,7 @@ add_definitions(
 # RFA version
         -DRFA_LIBRARY_VERSION="7.2.1."
 # production release
-#	-DOFFICIAL_BUILD
+	-DOFFICIAL_BUILD
 )
 
 # SEH Exceptions

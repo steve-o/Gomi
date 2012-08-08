@@ -111,7 +111,7 @@ gomi::bar_t::Calculate (
 	const __time32_t from = to_unix_epoch (tp_.begin());
 	const __time32_t till = to_unix_epoch (tp_.end());
 
-	LOG(INFO) << "from: " << from << " till: " << till;
+	DVLOG(4) << "from: " << from << " till: " << till;
 	try {
 		U64 numRecs = FlexRecPrimitives::GetFlexRecords (
 							handle, 

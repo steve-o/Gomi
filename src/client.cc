@@ -92,7 +92,7 @@ gomi::client_t::processEvent (
 	const rfa::common::Event& event_
 	)
 {
-	VLOG(1) << event_;
+	VLOG(10) << event_;
 	cumulative_stats_[CLIENT_PC_RFA_EVENTS_RECEIVED]++;
 	last_activity_ = boost::posix_time::second_clock::universal_time();
 	switch (event_.getType()) {
@@ -550,7 +550,7 @@ gomi::client_t::processItemRequest (
 	)
 {
 	cumulative_stats_[CLIENT_PC_ITEM_REQUEST_RECEIVED]++;
-	LOG(INFO) << prefix_ << "ItemRequest:" << request_msg;
+	DVLOG(3) << prefix_ << "ItemRequest:" << request_msg;
 
 /* 10.3.6 Handling Item Requests
  * - Ensure that the requesting session is logged in.
@@ -652,7 +652,7 @@ gomi::client_t::processItemRequest (
 			else
 			{
 /* decompose request */
-				LOG(INFO) << "item name: [" << item_name << "] len: " << item_name_len;
+				DVLOG(4) << "item name: [" << item_name << "] len: " << item_name_len;
 				url_parse::Parsed parsed;
 				url_parse::Component file_name;
 				std::string url ("vta://localhost");
@@ -676,7 +676,7 @@ gomi::client_t::processItemRequest (
 					sendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotFoundEnum);
 					return;
 				}
-				LOG(INFO) << prefix_ << "Forwarding request for \"" << parsed_file_name << "\".";
+				DVLOG(4) << prefix_ << "Forwarding request for \"" << parsed_file_name << "\".";
 				auto& stream = it->second;
 				DCHECK ((bool)stream);
 				auto client_request = std::make_shared<request_t> (stream, shared_from_this(), is_streaming_request, use_attribinfo_in_updates);

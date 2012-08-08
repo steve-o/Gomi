@@ -118,7 +118,7 @@ gomi::bin_t::Calculate (
 #else
 		bars_[t].Calculate (handle_, work_area, view_element);
 #endif
-		LOG(INFO) << "bar: { "
+		VLOG(3) << "bar: { "
 			  "symbol: \"" << symbol_name_ << "\""
 			", day: " << t <<
 			", time_period: \"" << to_simple_string (tp) << "\""
@@ -188,8 +188,7 @@ gomi::bin_t::Calculate (
 		average_nonzero_volume_ = accumulated_volume / trading_day_count_;
 	}
 
-//	DVLOG(1) << "Calculate() complete,"
-	LOG(INFO) << "Calculate() complete,"
+	VLOG(2) << "Calculate() complete,"
 		" day_count=" << trading_day_count_ <<
 		" acvol=" << accumulated_volume << 
 		" avgvol=" << average_volume_ <<
