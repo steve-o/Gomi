@@ -385,7 +385,7 @@ protected:
 /* 7.4.8.2 Create or re-use a request attribute object (4.2.4) */
 		attribInfo_.clear();
 		attribInfo_.setNameType (rfa::rdm::INSTRUMENT_NAME_RIC);
-		attribInfo_.setServiceID (provider_->getServiceId());
+		attribInfo_.setServiceID (provider_->GetServiceId());
 		attribInfo_.setName (stream_name);
 		response_.setAttribInfo (attribInfo_);
 
@@ -513,7 +513,7 @@ protected:
 				      " }";
 		}
 #endif
-		provider_->send (response_, token);
+		provider_->Send (response_, token);
 		VLOG(3) << prefix_ << "Response sent.";
 	}
 
@@ -535,7 +535,7 @@ protected:
 			", \"RwfMinorVersion\": " << (int)rwf_minor_version <<
 			" }";
 
-		DCHECK(service_id == provider_->getServiceId());
+		DCHECK(service_id == provider_->GetServiceId());
 		DCHECK(model_type == rfa::rdm::MMT_MARKET_PRICE);
 
 /* derived symbol name */
@@ -657,13 +657,13 @@ gomi::gomi_t::~gomi_t()
 	boost::unique_lock<boost::shared_mutex> (global_list_lock_);
 	global_list_.remove (this);
 
-	clear();
+	Clear();
 }
 
 /* is bin not a 10-minute time period, i.e. a realtime component.
  */
 bool
-gomi::gomi_t::is_special_bin (const gomi::bin_decl_t& bin)
+gomi::gomi_t::IsSpecialBin (const gomi::bin_decl_t& bin) const
 {
 	assert (!bin.bin_name.empty());
 	auto it = config_.realtime_fids.find (bin.bin_name);
@@ -701,15 +701,15 @@ gomi::gomi_t::init (
 		is_shutdown_ = true;
 		throw vpf::UserPluginException ("Invalid configuration, aborting.");
 	}
-	if (!init()) {
-		clear();
+	if (!Init()) {
+		Clear();
 		is_shutdown_ = true;
 		throw vpf::UserPluginException ("Initialization failed, aborting.");
 	}
 }
 
 bool
-gomi::gomi_t::init()
+gomi::gomi_t::Init()
 {
 	std::vector<std::string> symbolmap;
 
@@ -777,7 +777,7 @@ gomi::gomi_t::init()
 	try {
 /* RFA context. */
 		rfa_.reset (new rfa_t (config_));
-		if (!(bool)rfa_ || !rfa_->init())
+		if (!(bool)rfa_ || !rfa_->Init())
 			return false;
 
 /* RFA asynchronous event queue. */
@@ -794,7 +794,7 @@ gomi::gomi_t::init()
 
 /* RFA provider. */
 		provider_.reset (new provider_t (config_, rfa_, event_queue_, zmq_context_));
-		if (!(bool)provider_ || !provider_->init())
+		if (!(bool)provider_ || !provider_->Init())
 			return false;
 
 /* Create state for published instruments: For every instrument, e.g. MSFT.O
@@ -802,7 +802,7 @@ gomi::gomi_t::init()
 		std::for_each (symbolmap.begin(), symbolmap.end(), [&](const std::string& symbol) {
 			auto stream = std::make_shared<archive_stream_t> (symbol);
 			CHECK ((bool)stream);
-			bool status = provider_->createItemStream (symbol.c_str(), stream);
+			bool status = provider_->CreateItemStream (symbol.c_str(), stream);
 			CHECK (status);
 			directory_.emplace (std::make_pair (symbol, std::move (stream)));
 		});
@@ -883,7 +883,7 @@ gomi::gomi_t::init()
 
 	try {
 /* Register Tcl commands with TREP-VA search engine and await callbacks. */
-		if (!register_tcl_api (getId()))
+		if (!RegisterTclApi (getId()))
 			return false;
 	} catch (std::exception& e) {
 		LOG(ERROR) << "TclApi::Exception: { "
@@ -896,7 +896,7 @@ gomi::gomi_t::init()
 }
 
 void
-gomi::gomi_t::clear()
+gomi::gomi_t::Clear()
 {
 /* Interrupt worker threads. */
 	if (!workers_.empty()) {
@@ -960,8 +960,8 @@ void
 gomi::gomi_t::destroy()
 {
 	LOG(INFO) << "Closing instance.";
-	unregister_tcl_api (getId());
-	clear();
+	UnregisterTclApi (getId());
+	Clear();
 	LOG(INFO) << "Runtime summary: {"
 		    " \"tclQueryReceived\": " << cumulative_stats_[GOMI_PC_TCL_QUERY_RECEIVED] <<
 		" }";

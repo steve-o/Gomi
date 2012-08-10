@@ -94,46 +94,46 @@ namespace gomi
 		provider_t (const config_t& config, std::shared_ptr<rfa_t> rfa, std::shared_ptr<rfa::common::EventQueue> event_queue, std::shared_ptr<void> zmq_context);
 		~provider_t();
 
-		bool init() throw (rfa::common::InvalidConfigurationException, rfa::common::InvalidUsageException);
+		bool Init() throw (rfa::common::InvalidConfigurationException, rfa::common::InvalidUsageException);
 
-		bool createItemStream (const char* name, std::shared_ptr<item_stream_t> item_stream) throw (rfa::common::InvalidUsageException);
-		bool send (item_stream_t& item_stream, rfa::message::RespMsg& msg, const rfa::message::AttribInfo& attribInfo) throw (rfa::common::InvalidUsageException);
-		bool send (rfa::message::RespMsg& msg, rfa::sessionLayer::RequestToken& token) throw (rfa::common::InvalidUsageException);
+		bool CreateItemStream (const char* name, std::shared_ptr<item_stream_t> item_stream) throw (rfa::common::InvalidUsageException);
+		bool Send (item_stream_t& item_stream, rfa::message::RespMsg& msg, const rfa::message::AttribInfo& attribInfo) throw (rfa::common::InvalidUsageException);
+		bool Send (rfa::message::RespMsg& msg, rfa::sessionLayer::RequestToken& token) throw (rfa::common::InvalidUsageException);
 
 /* RFA event callback. */
 		void processEvent (const rfa::common::Event& event) override;
 
-		uint16_t getRwfVersion() const {
+		uint16_t GetRwfVersion() const {
 			return min_rwf_version_.load();
 		}
-		const char* getServiceName() const {
+		const char* GetServiceName() const {
 			return config_.service_name.c_str();
 		}
-		uint32_t getServiceId() const {
+		uint32_t GetServiceId() const {
 			return service_id_;
 		}
 
 	private:
-		void processConnectionEvent (const rfa::sessionLayer::ConnectionEvent& event);
-		void processOMMActiveClientSessionEvent (const rfa::sessionLayer::OMMActiveClientSessionEvent& event);
-		void processOMMCmdErrorEvent (const rfa::sessionLayer::OMMCmdErrorEvent& event);
+		void OnConnectionEvent (const rfa::sessionLayer::ConnectionEvent& event);
+		void OnOMMActiveClientSessionEvent (const rfa::sessionLayer::OMMActiveClientSessionEvent& event);
+		void OnOMMCmdErrorEvent (const rfa::sessionLayer::OMMCmdErrorEvent& event);
 
-		bool rejectClientSession (const rfa::common::Handle* handle);
-		bool acceptClientSession (const rfa::common::Handle* handle);
-		bool eraseClientSession (rfa::common::Handle* handle);
+		bool RejectClientSession (const rfa::common::Handle* handle);
+		bool AcceptClientSession (const rfa::common::Handle* handle);
+		bool EraseClientSession (rfa::common::Handle* handle);
 
-		void getDirectoryResponse (rfa::message::RespMsg* msg, uint8_t rwf_major_version, uint8_t rwf_minor_version, const char* service_name, uint32_t filter_mask, uint8_t response_type);
-		void getServiceDirectory (rfa::data::Map* map, uint8_t rwf_major_version, uint8_t rwf_minor_version, const char* service_name, uint32_t filter_mask);
-		void getServiceFilterList (rfa::data::FilterList* filterList, uint8_t rwf_major_version, uint8_t rwf_minor_version, uint32_t filter_mask);
-		void getServiceInformation (rfa::data::ElementList* elementList, uint8_t rwf_major_version, uint8_t rwf_minor_version);
-		void getServiceCapabilities (rfa::data::Array* capabilities);
-		void getServiceDictionaries (rfa::data::Array* dictionaries);
-		void getServiceState (rfa::data::ElementList* elementList, uint8_t rwf_major_version, uint8_t rwf_minor_version);
+		void GetDirectoryResponse (rfa::message::RespMsg* msg, uint8_t rwf_major_version, uint8_t rwf_minor_version, const char* service_name, uint32_t filter_mask, uint8_t response_type);
+		void GetServiceDirectory (rfa::data::Map* map, uint8_t rwf_major_version, uint8_t rwf_minor_version, const char* service_name, uint32_t filter_mask);
+		void GetServiceFilterList (rfa::data::FilterList* filterList, uint8_t rwf_major_version, uint8_t rwf_minor_version, uint32_t filter_mask);
+		void GetServiceInformation (rfa::data::ElementList* elementList, uint8_t rwf_major_version, uint8_t rwf_minor_version);
+		void GetServiceCapabilities (rfa::data::Array* capabilities);
+		void GetServiceDictionaries (rfa::data::Array* dictionaries);
+		void GetServiceState (rfa::data::ElementList* elementList, uint8_t rwf_major_version, uint8_t rwf_minor_version);
 
-		uint32_t send (rfa::common::Msg& msg, rfa::sessionLayer::RequestToken& token, void* closure) throw (rfa::common::InvalidUsageException);
-		uint32_t submit (rfa::common::Msg& msg, rfa::sessionLayer::RequestToken& token, void* closure) throw (rfa::common::InvalidUsageException);
+		uint32_t Send (rfa::common::Msg& msg, rfa::sessionLayer::RequestToken& token, void* closure) throw (rfa::common::InvalidUsageException);
+		uint32_t Submit (rfa::common::Msg& msg, rfa::sessionLayer::RequestToken& token, void* closure) throw (rfa::common::InvalidUsageException);
 
-		void setServiceId (uint32_t service_id) {
+		void SetServiceId (uint32_t service_id) {
 			service_id_.store (service_id);
 		}
 

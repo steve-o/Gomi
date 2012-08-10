@@ -118,10 +118,10 @@ namespace gomi
 		virtual void init (const vpf::UserPluginConfig& config_) override;
 
 /* Core initialization. */
-		bool init();
+		bool Init();
 
 /* Reset state suitable for recalling init(). */
-		void clear();
+		void Clear();
 
 /* Plugin termination point. */
 		virtual void destroy() override;
@@ -136,14 +136,14 @@ namespace gomi
 	private:
 
 /* Run core event loop. */
-		void mainLoop();
+		void MainLoop();
 
-		bool register_tcl_api (const char* id);
-		bool unregister_tcl_api (const char* id);
-		int tclGomiQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
-		int tclFeedLogQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
+		bool RegisterTclApi (const char* id);
+		bool UnregisterTclApi (const char* id);
+		int TclGomiQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
+		int TclFeedLogQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 
-		bool is_special_bin (const bin_decl_t& bin);
+		bool IsSpecialBin (const bin_decl_t& bin) const;
 
 /* Unique instance number per process. */
 		LONG instance_;

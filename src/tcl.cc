@@ -37,7 +37,7 @@ static const char* kTclApi[] = {
 /* Register Tcl API.
  */
 bool
-gomi::gomi_t::register_tcl_api (const char* id)
+gomi::gomi_t::RegisterTclApi (const char* id)
 {
 	for (size_t i = 0; i < _countof (kTclApi); ++i) {
 		registerCommand (id, kTclApi[i]);
@@ -49,7 +49,7 @@ gomi::gomi_t::register_tcl_api (const char* id)
 /* Unregister Tcl API.
  */
 bool
-gomi::gomi_t::unregister_tcl_api (const char* id)
+gomi::gomi_t::UnregisterTclApi (const char* id)
 {
 	for (size_t i = 0; i < _countof (kTclApi); ++i) {
 		deregisterCommand (id, kTclApi[i]);
@@ -103,9 +103,9 @@ gomi::gomi_t::execute (
 	try {
 		const char* command = cmdInfo.getCommandName();
 		if (0 == strcmp (command, kBasicFunctionName))
-			retval = tclGomiQuery (cmdInfo, cmdData);
+			retval = TclGomiQuery (cmdInfo, cmdData);
 		else if (0 == strcmp (command, kFeedLogFunctionName))
-			retval = tclFeedLogQuery (cmdInfo, cmdData);
+			retval = TclFeedLogQuery (cmdInfo, cmdData);
 		else
 			Tcl_SetResult (interp, "unknown function", TCL_STATIC);
 	}
@@ -137,7 +137,7 @@ gomi::gomi_t::execute (
  *	gomi_query ”America/New_York” [TIBX.O, NKE.N] 10 "09:00" "09:30"
  */
 int
-gomi::gomi_t::tclGomiQuery (
+gomi::gomi_t::TclGomiQuery (
 	const vpf::CommandInfo& cmdInfo,
 	vpf::TCLCommandData& cmdData
 	)
@@ -323,7 +323,7 @@ uint64_t flexrecord_t::sequence_ = 0;
  * variant of gomi_query that outputs to a feedlog formatted file.
  */
 int
-gomi::gomi_t::tclFeedLogQuery (
+gomi::gomi_t::TclFeedLogQuery (
 	const vpf::CommandInfo& cmdInfo,
 	vpf::TCLCommandData& cmdData
 	)

@@ -47,10 +47,10 @@ namespace gomi
 		bool Calculate (const TBSymbolHandle& handle, FlexRecWorkAreaElement* work_area, FlexRecViewElement* view_element);
 
 		void SetTimePeriod (const boost::posix_time::time_period tp) { tp_ = tp; }
-		double GetOpenPrice() { return boost::accumulators::first (last_price_); }
-		double GetClosePrice() { return boost::accumulators::last (last_price_); }
-		uint64_t GetNumberMoves() { return boost::accumulators::count (last_price_); }
-		uint64_t GetAccumulatedVolume() { return boost::accumulators::sum (tick_volume_); }
+		double GetOpenPrice() const { return boost::accumulators::first (last_price_); }
+		double GetClosePrice() const { return boost::accumulators::last (last_price_); }
+		uint64_t GetNumberMoves() const { return boost::accumulators::count (last_price_); }
+		uint64_t GetAccumulatedVolume() const { return boost::accumulators::sum (tick_volume_); }
 
 		static int processFlexRecord (FRTreeCallbackInfo* info);
 

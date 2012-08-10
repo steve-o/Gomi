@@ -82,7 +82,7 @@ gomi::provider_t::~provider_t()
 }
 
 bool
-gomi::provider_t::init()
+gomi::provider_t::Init()
 {
 	last_activity_ = boost::posix_time::second_clock::universal_time();
 
@@ -155,7 +155,7 @@ gomi::provider_t::init()
  * the provider state on behalf of the application.
  */
 bool
-gomi::provider_t::createItemStream (
+gomi::provider_t::CreateItemStream (
 	const char* name,
 	std::shared_ptr<item_stream_t> item_stream
 	)
@@ -176,7 +176,7 @@ gomi::provider_t::createItemStream (
  */
 
 bool
-gomi::provider_t::send (
+gomi::provider_t::Send (
 	item_stream_t& stream,
 	rfa::message::RespMsg& msg,
 	const rfa::message::AttribInfo& attribInfo
@@ -192,7 +192,7 @@ gomi::provider_t::send (
 		if (request.second->is_muted || request.second->use_attribinfo_in_updates)
 			return;
 		DCHECK(request.second->is_streaming);
-		this->send (static_cast<rfa::common::Msg&> (msg), *(request.first), nullptr);
+		Send (static_cast<rfa::common::Msg&> (msg), *(request.first), nullptr);
 		auto client = request.second->client.lock();
 		if ((bool)client) {
 			client->cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT]++;
@@ -210,7 +210,7 @@ gomi::provider_t::send (
 			if (request.second->is_muted || !request.second->use_attribinfo_in_updates)
 				return;
 			DCHECK(request.second->is_streaming);
-			this->send (static_cast<rfa::common::Msg&> (msg), *(request.first), nullptr);
+			Send (static_cast<rfa::common::Msg&> (msg), *(request.first), nullptr);
 			auto client = request.second->client.lock();
 			if ((bool)client) {
 				client->cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT]++;
@@ -227,7 +227,7 @@ gomi::provider_t::send (
 /* Send an Rfa initial image to a single client.
  */
 bool
-gomi::provider_t::send (
+gomi::provider_t::Send (
 	rfa::message::RespMsg& msg,
 	rfa::sessionLayer::RequestToken& token
 	)
@@ -249,7 +249,7 @@ gomi::provider_t::send (
 /* lock updates for this stream */
 	boost::upgrade_lock<boost::shared_mutex> stream_lock (stream->lock);
 /* forward refresh image */
-	send (static_cast<rfa::common::Msg&> (msg), token, nullptr);
+	Send (static_cast<rfa::common::Msg&> (msg), token, nullptr);
 	cumulative_stats_[PROVIDER_PC_MSGS_SENT]++;
 	client->cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT]++;
 	client->last_activity_ = last_activity_ = boost::posix_time::second_clock::universal_time();
@@ -275,7 +275,7 @@ gomi::provider_t::send (
 }
 
 uint32_t
-gomi::provider_t::send (
+gomi::provider_t::Send (
 	rfa::common::Msg& msg,
 	rfa::sessionLayer::RequestToken& token,
 	void* closure
@@ -284,13 +284,13 @@ gomi::provider_t::send (
 	if (is_muted_)
 		return false;
 
-	return submit (msg, token, closure);
+	return Submit (msg, token, closure);
 }
 
 /* 7.4.8 Sending response messages using an OMM provider.
  */
 uint32_t
-gomi::provider_t::submit (
+gomi::provider_t::Submit (
 	rfa::common::Msg& msg,
 	rfa::sessionLayer::RequestToken& token,
 	void* closure
@@ -320,15 +320,15 @@ gomi::provider_t::processEvent (
 	cumulative_stats_[PROVIDER_PC_RFA_EVENTS_RECEIVED]++;
 	switch (event_.getType()) {
 	case rfa::sessionLayer::ConnectionEventEnum:
-		processConnectionEvent(static_cast<const rfa::sessionLayer::ConnectionEvent&>(event_));
+		OnConnectionEvent(static_cast<const rfa::sessionLayer::ConnectionEvent&>(event_));
 		break;
 
 	case rfa::sessionLayer::OMMActiveClientSessionEventEnum:
-		processOMMActiveClientSessionEvent(static_cast<const rfa::sessionLayer::OMMActiveClientSessionEvent&>(event_));
+		OnOMMActiveClientSessionEvent(static_cast<const rfa::sessionLayer::OMMActiveClientSessionEvent&>(event_));
 		break;
 
         case rfa::sessionLayer::OMMCmdErrorEventEnum:
-                processOMMCmdErrorEvent (static_cast<const rfa::sessionLayer::OMMCmdErrorEvent&>(event_));
+                OnOMMCmdErrorEvent (static_cast<const rfa::sessionLayer::OMMCmdErrorEvent&>(event_));
                 break;
 
         default:
@@ -341,7 +341,7 @@ gomi::provider_t::processEvent (
 /* 7.4.7.4 Handling Listener Connection Events (new connection events).
  */
 void
-gomi::provider_t::processConnectionEvent (
+gomi::provider_t::OnConnectionEvent (
 	const rfa::sessionLayer::ConnectionEvent& connection_event
 	)
 {
@@ -354,16 +354,16 @@ gomi::provider_t::processConnectionEvent (
  * example, it might have a maximum supported number of connections.
  */
 void
-gomi::provider_t::processOMMActiveClientSessionEvent (
+gomi::provider_t::OnOMMActiveClientSessionEvent (
 	const rfa::sessionLayer::OMMActiveClientSessionEvent& session_event
 	)
 {
 	cumulative_stats_[PROVIDER_PC_OMM_ACTIVE_CLIENT_SESSION_RECEIVED]++;
 	try {
 		if (!is_accepting_connections_ || clients_.size() == config_.session_capacity)
-			rejectClientSession (session_event.getClientSessionHandle());
+			RejectClientSession (session_event.getClientSessionHandle());
 		else
-			acceptClientSession (session_event.getClientSessionHandle());
+			AcceptClientSession (session_event.getClientSessionHandle());
 /* ignore any error */
 	} catch (rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[PROVIDER_PC_OMM_ACTIVE_CLIENT_SESSION_EXCEPTION]++;
@@ -374,7 +374,7 @@ gomi::provider_t::processOMMActiveClientSessionEvent (
 }
 
 bool
-gomi::provider_t::rejectClientSession (
+gomi::provider_t::RejectClientSession (
 	const rfa::common::Handle* handle
 	)
 {
@@ -394,7 +394,7 @@ gomi::provider_t::rejectClientSession (
 }
 
 bool
-gomi::provider_t::acceptClientSession (
+gomi::provider_t::AcceptClientSession (
 	const rfa::common::Handle* handle
 	)
 {
@@ -410,28 +410,28 @@ gomi::provider_t::acceptClientSession (
 	auto registered_handle = omm_provider_->registerClient (event_queue_.get(), &ommClientSessionIntSpec, *static_cast<rfa::common::Client*> (client.get()), nullptr /* closure */);
 	if (nullptr == registered_handle)
 		return false;
-	if (!client->init (registered_handle, sender_))
+	if (!client->Init (registered_handle, sender_))
 		return false;
-	if (!client->getAssociatedMetaInfo()) {
+	if (!client->GetAssociatedMetaInfo()) {
 		omm_provider_->unregisterClient (registered_handle);
 		return false;
 	}
 
 /* Determine lowest common Reuters Wire Format (RWF) version */
-	const uint16_t client_rwf_version = (client->getRwfMajorVersion() * 256) + client->getRwfMinorVersion();
+	const uint16_t client_rwf_version = (client->GetRwfMajorVersion() * 256) + client->GetRwfMinorVersion();
 	if (0 == min_rwf_version_)
 	{
 		LOG(INFO) << "Setting RWF: { "
-				  "\"MajorVersion\": " << (unsigned)client->getRwfMajorVersion() <<
-				", \"MinorVersion\": " << (unsigned)client->getRwfMinorVersion() <<
+				  "\"MajorVersion\": " << (unsigned)client->GetRwfMajorVersion() <<
+				", \"MinorVersion\": " << (unsigned)client->GetRwfMinorVersion() <<
 				" }";
 		min_rwf_version_.store (client_rwf_version);
 	}
 	else if (min_rwf_version_ > client_rwf_version)
 	{
 		LOG(INFO) << "Degrading RWF: { "
-				  "\"MajorVersion\": " << (unsigned)client->getRwfMajorVersion() <<
-				", \"MinorVersion\": " << (unsigned)client->getRwfMinorVersion() <<
+				  "\"MajorVersion\": " << (unsigned)client->GetRwfMajorVersion() <<
+				", \"MinorVersion\": " << (unsigned)client->GetRwfMinorVersion() <<
 				" }";
 		min_rwf_version_.store (client_rwf_version);
 	}
@@ -443,7 +443,7 @@ gomi::provider_t::acceptClientSession (
 }
 
 bool
-gomi::provider_t::eraseClientSession (
+gomi::provider_t::EraseClientSession (
 	rfa::common::Handle* handle
 	)
 {
@@ -474,7 +474,7 @@ gomi::provider_t::eraseClientSession (
  * availability of the service.
  */
 void
-gomi::provider_t::getDirectoryResponse (
+gomi::provider_t::GetDirectoryResponse (
 	rfa::message::RespMsg* response,
 	uint8_t rwf_major_version,
 	uint8_t rwf_minor_version,
@@ -522,7 +522,7 @@ gomi::provider_t::getDirectoryResponse (
  */
 // not std::map :(  derived from rfa::common::Data
 	map_.clear();
-	getServiceDirectory (&map_, rwf_major_version, rwf_minor_version, service_name, filter_mask);
+	GetServiceDirectory (&map_, rwf_major_version, rwf_minor_version, service_name, filter_mask);
 	response->setPayload (map_);
 
 	status_.clear();
@@ -538,7 +538,7 @@ gomi::provider_t::getDirectoryResponse (
 /* Populate map with service directory, must be cleared before call.
  */
 void
-gomi::provider_t::getServiceDirectory (
+gomi::provider_t::GetServiceDirectory (
 	rfa::data::Map* map,
 	uint8_t rwf_major_version,
 	uint8_t rwf_minor_version,
@@ -578,13 +578,13 @@ gomi::provider_t::getServiceDirectory (
 	dataBuffer.setFromString (serviceName, rfa::data::DataBuffer::StringAsciiEnum);
 	mapEntry.setKeyData (dataBuffer);
 	it.bind (mapEntry);
-	getServiceFilterList (&filterList, rwf_major_version, rwf_minor_version, filter_mask);
+	GetServiceFilterList (&filterList, rwf_major_version, rwf_minor_version, filter_mask);
 
 	it.complete();
 }
 
 void
-gomi::provider_t::getServiceFilterList (
+gomi::provider_t::GetServiceFilterList (
 	rfa::data::FilterList* filterList,
 	uint8_t rwf_major_version,
 	uint8_t rwf_minor_version,
@@ -612,12 +612,12 @@ gomi::provider_t::getServiceFilterList (
 	if (use_info_filter) {
 		filterEntry.setFilterId (rfa::rdm::SERVICE_INFO_ID);
 		it.bind (filterEntry, rfa::data::ElementListEnum);
-		getServiceInformation (&elementList, rwf_major_version, rwf_minor_version);
+		GetServiceInformation (&elementList, rwf_major_version, rwf_minor_version);
 	}
 	if (use_state_filter) {
 		filterEntry.setFilterId (rfa::rdm::SERVICE_STATE_ID);
 		it.bind (filterEntry, rfa::data::ElementListEnum);
-		getServiceState (&elementList, rwf_major_version, rwf_minor_version);
+		GetServiceState (&elementList, rwf_major_version, rwf_minor_version);
 	}
 
 	it.complete();
@@ -627,7 +627,7 @@ gomi::provider_t::getServiceFilterList (
  * Information about a service that does not update very often.
  */
 void
-gomi::provider_t::getServiceInformation (
+gomi::provider_t::GetServiceInformation (
 	rfa::data::ElementList* elementList,
 	uint8_t rwf_major_version,
 	uint8_t rwf_minor_version
@@ -658,7 +658,7 @@ gomi::provider_t::getServiceInformation (
  */
 	element.setName (rfa::rdm::ENAME_CAPABILITIES);
 	it.bind (element);
-	getServiceCapabilities (&array_);
+	GetServiceCapabilities (&array_);
 
 /* DictionariesUsed<Array of AsciiString>
  * List of Dictionary names that may be required to process all of the data 
@@ -667,7 +667,7 @@ gomi::provider_t::getServiceInformation (
  */
 	element.setName (rfa::rdm::ENAME_DICTIONARYS_USED);
 	it.bind (element);
-	getServiceDictionaries (&array_);
+	GetServiceDictionaries (&array_);
 
 	it.complete();
 }
@@ -676,7 +676,7 @@ gomi::provider_t::getServiceInformation (
  * rfa::data::Array does not require version tagging according to examples.
  */
 void
-gomi::provider_t::getServiceCapabilities (
+gomi::provider_t::GetServiceCapabilities (
 	rfa::data::Array* capabilities
 	)
 {
@@ -693,7 +693,7 @@ gomi::provider_t::getServiceCapabilities (
 }
 
 void
-gomi::provider_t::getServiceDictionaries (
+gomi::provider_t::GetServiceDictionaries (
 	rfa::data::Array* dictionaries
 	)
 {
@@ -717,7 +717,7 @@ gomi::provider_t::getServiceDictionaries (
  * State of a service.
  */
 void
-gomi::provider_t::getServiceState (
+gomi::provider_t::GetServiceState (
 	rfa::data::ElementList* elementList,
 	uint8_t rwf_major_version,
 	uint8_t rwf_minor_version
@@ -761,7 +761,7 @@ gomi::provider_t::getServiceState (
  * failed.
  */
 void
-gomi::provider_t::processOMMCmdErrorEvent (
+gomi::provider_t::OnOMMCmdErrorEvent (
 	const rfa::sessionLayer::OMMCmdErrorEvent& error
 	)
 {
