@@ -88,7 +88,7 @@ namespace gomi
 /* RFA event callback. */
 		void processEvent (const rfa::common::Event& event) override;
 
-		bool Init (rfa::common::Handle*const handle, std::shared_ptr<void> sender);
+		bool Init (rfa::common::Handle*const handle);
 		rfa::common::Handle*const GetHandle() const {
 			return handle_;
 		}
@@ -139,18 +139,9 @@ namespace gomi
 		uint8_t rwf_major_version_;
 		uint8_t rwf_minor_version_;
 
-/* RFA will return a CmdError message if the provider application submits data
- * before receiving a login success message.  Mute downstream publishing until
- * permission is granted to submit data.
- */
-		bool is_muted_;
-
 /* Item requests may appear before login success has been granted.
  */
 		bool is_logged_in_;
-
-/* RFA request thread client. */
-		std::shared_ptr<void> sender_;
 
 		friend provider_t;
 

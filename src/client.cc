@@ -31,7 +31,6 @@ gomi::client_t::client_t (
 	login_token_ (nullptr),
 	rwf_major_version_ (0),
 	rwf_minor_version_ (0),
-	is_muted_ (true),
 	is_logged_in_ (false)
 {
 	ZeroMemory (cumulative_stats_, sizeof (cumulative_stats_));
@@ -56,14 +55,11 @@ gomi::client_t::~client_t()
 
 bool
 gomi::client_t::Init (
-	rfa::common::Handle*const handle,
-	std::shared_ptr<void> sender
+	rfa::common::Handle*const handle
 	)
 {
 /* save non-const client session handle. */
 	handle_ = handle;
-/* zmq send socket for forwarding image requests. */
-	sender_ = sender;
 	return true;
 }
 
@@ -698,7 +694,8 @@ gomi::client_t::OnItemRequest (
 				request.mutable_refresh()->set_rwf_minor_version (rwf_minor_version_);
 				zmq_msg_init_size (&msg, request.ByteSize());
 				request.SerializeToArray (zmq_msg_data (&msg), (int)zmq_msg_size (&msg));
-				zmq_send (sender_.get(), &msg, 0);
+				auto sock = provider_.sender_.get();
+				zmq_send (sock, &msg, 0);
 				zmq_msg_close (&msg);
 			}
 		}

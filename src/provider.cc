@@ -410,7 +410,7 @@ gomi::provider_t::AcceptClientSession (
 	auto registered_handle = omm_provider_->registerClient (event_queue_.get(), &ommClientSessionIntSpec, *static_cast<rfa::common::Client*> (client.get()), nullptr /* closure */);
 	if (nullptr == registered_handle)
 		return false;
-	if (!client->Init (registered_handle, sender_))
+	if (!client->Init (registered_handle))
 		return false;
 	if (!client->GetAssociatedMetaInfo()) {
 		omm_provider_->unregisterClient (registered_handle);
