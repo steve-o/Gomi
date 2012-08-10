@@ -28,9 +28,13 @@
 /* RFA 7.2 */
 #include <rfa/rfa.hh>
 
+/* ZeroMQ messaging middleware. */
+#include <zmq.h>
+
 #include "rfa.hh"
 #include "config.hh"
 #include "deleter.hh"
+#include "provider.pb.h"
 
 namespace gomi
 {
@@ -61,7 +65,7 @@ namespace gomi
 			  client (client_),
 			  is_streaming (is_streaming_),
 			  use_attribinfo_in_updates (use_attribinfo_in_updates_),
-			  is_muted (true)
+			  has_initial_image (false)
 		{
 		}
 
@@ -69,7 +73,11 @@ namespace gomi
 		std::weak_ptr<client_t> client;
 		const bool is_streaming;
 		const bool use_attribinfo_in_updates;	/* can theoretically change in reissue */
-		bool is_muted;				/* changes after refresh */
+/* RFA will return a CmdError message if the provider application submits data
+ * before receiving a login success message.  Mute downstream publishing until
+ * permission is granted to submit data.
+ */
+		boost::atomic_bool has_initial_image;
 	};
 
 	class item_stream_t : boost::noncopyable
@@ -98,7 +106,7 @@ namespace gomi
 
 		bool CreateItemStream (const char* name, std::shared_ptr<item_stream_t> item_stream) throw (rfa::common::InvalidUsageException);
 		bool Send (item_stream_t& item_stream, rfa::message::RespMsg& msg, const rfa::message::AttribInfo& attribInfo) throw (rfa::common::InvalidUsageException);
-		bool Send (rfa::message::RespMsg& msg, rfa::sessionLayer::RequestToken& token) throw (rfa::common::InvalidUsageException);
+		bool SendReply (rfa::message::RespMsg& msg, rfa::sessionLayer::RequestToken& token) throw (rfa::common::InvalidUsageException);
 
 /* RFA event callback. */
 		void processEvent (const rfa::common::Event& event) override;
@@ -123,14 +131,13 @@ namespace gomi
 		bool EraseClientSession (rfa::common::Handle* handle);
 
 		void GetDirectoryResponse (rfa::message::RespMsg* msg, uint8_t rwf_major_version, uint8_t rwf_minor_version, const char* service_name, uint32_t filter_mask, uint8_t response_type);
-		void GetServiceDirectory (rfa::data::Map* map, uint8_t rwf_major_version, uint8_t rwf_minor_version, const char* service_name, uint32_t filter_mask);
-		void GetServiceFilterList (rfa::data::FilterList* filterList, uint8_t rwf_major_version, uint8_t rwf_minor_version, uint32_t filter_mask);
-		void GetServiceInformation (rfa::data::ElementList* elementList, uint8_t rwf_major_version, uint8_t rwf_minor_version);
-		void GetServiceCapabilities (rfa::data::Array* capabilities);
-		void GetServiceDictionaries (rfa::data::Array* dictionaries);
-		void GetServiceState (rfa::data::ElementList* elementList, uint8_t rwf_major_version, uint8_t rwf_minor_version);
+		void GetServiceDirectory (rfa::data::Map* map, rfa::data::SingleWriteIterator* it, uint8_t rwf_major_version, uint8_t rwf_minor_version, const char* service_name, uint32_t filter_mask);
+		void GetServiceFilterList (rfa::data::SingleWriteIterator* it, uint8_t rwf_major_version, uint8_t rwf_minor_version, uint32_t filter_mask);
+		void GetServiceInformation (rfa::data::SingleWriteIterator* it, uint8_t rwf_major_version, uint8_t rwf_minor_version);
+		void GetServiceCapabilities (rfa::data::SingleWriteIterator* it);
+		void GetServiceDictionaries (rfa::data::SingleWriteIterator* it);
+		void GetServiceState (rfa::data::SingleWriteIterator* it, uint8_t rwf_major_version, uint8_t rwf_minor_version);
 
-		uint32_t Send (rfa::common::Msg& msg, rfa::sessionLayer::RequestToken& token, void* closure) throw (rfa::common::InvalidUsageException);
 		uint32_t Submit (rfa::common::Msg& msg, rfa::sessionLayer::RequestToken& token, void* closure) throw (rfa::common::InvalidUsageException);
 
 		void SetServiceId (uint32_t service_id) {
@@ -175,18 +182,24 @@ namespace gomi
 		boost::atomic_uint32_t service_id_;
 
 /* Pre-allocated shared resource. */
-		rfa::data::Map map_;
+		rfa::message::RespMsg response_;
+		rfa::data::Array array_;
+		rfa::data::ElementList elementList_;
+		rfa::data::FilterList filterList_;
 		rfa::message::AttribInfo attribInfo_;
 		rfa::common::RespStatus status_;
+/* Client shared resource. */
+		rfa::data::Map map_;
+		zmq_msg_t msg_;
+		provider::Request request_;
 
 /* Iterator for populating publish fields */
-		rfa::data::SingleWriteIterator single_write_it_;
+		rfa::data::SingleWriteIterator map_it_, element_it_;
 
 /* RFA can reject new client requests whilst maintaining current connected sessions.
  */
 		bool is_accepting_connections_;
 		bool is_accepting_requests_;
-		bool is_muted_;
 
 /* Container of all item streams keyed by symbol name. */
 		boost::unordered_map<std::string, std::shared_ptr<item_stream_t>> directory_;

@@ -119,7 +119,7 @@ namespace gomi
 		bool SendDirectoryResponse (rfa::sessionLayer::RequestToken& token, const char* service_name, uint32_t filter_mask);
 		bool SendClose (rfa::sessionLayer::RequestToken& token, uint32_t service_id, uint8_t model_type, const char* name, bool use_attribinfo_in_updates, uint8_t status_code);
 
-		uint32_t Submit (rfa::common::Msg& msg, rfa::sessionLayer::RequestToken& token, void* closure) throw (rfa::common::InvalidUsageException);
+		uint32_t Submit (rfa::message::RespMsg& msg, rfa::sessionLayer::RequestToken& token, void* closure) throw (rfa::common::InvalidUsageException);
 
 		provider_t& provider_;
 

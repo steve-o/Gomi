@@ -43,11 +43,13 @@ gomi::provider_t::provider_t (
 	error_item_handle_ (nullptr),
 	min_rwf_version_ (0),
 	service_id_ (0),
+	response_ (false),	/* reference */
+	array_ (false),		/* reference */
+	elementList_ (false),	/* reference */
 	map_ (false),		/* reference */
 	attribInfo_ (false),	/* reference */
 	is_accepting_connections_ (true),
 	is_accepting_requests_ (true),
-	is_muted_ (false),
 	zmq_context_ (zmq_context)
 {
 	ZeroMemory (cumulative_stats_, sizeof (cumulative_stats_));
@@ -64,10 +66,17 @@ gomi::provider_t::~provider_t()
 		omm_provider_->unregisterClient (client.first);
 		client.second.reset();
 	});
+/* 0mq context */
+	CHECK (sender_.use_count() <= 1);
+	sender_.reset();
+	zmq_context_.reset();
+/* RFA handles */
 	if (nullptr != error_item_handle_)
 		omm_provider_->unregisterClient (error_item_handle_), error_item_handle_ = nullptr;
 	omm_provider_.reset();
 	session_.reset();
+	event_queue_.reset();
+	rfa_.reset();
 /* Summary output */
 	using namespace boost::posix_time;
 	auto uptime = second_clock::universal_time() - creation_time_;
@@ -103,8 +112,10 @@ gomi::provider_t::Init()
 
 /* Pre-allocate memory buffer for payload iterator */
 	CHECK (config_.maximum_data_size > 0);
-	single_write_it_.initialize (map_, (uint32_t)config_.maximum_data_size);
-	CHECK (single_write_it_.isInitialized());
+	map_it_.initialize (map_, (uint32_t)config_.maximum_data_size);
+	CHECK (map_it_.isInitialized());
+	element_it_.initialize (elementList_, (uint32_t)config_.maximum_data_size);
+	CHECK (element_it_.isInitialized());
 
 /* 7.4.5 Initializing an OMM Interactive Provider. */
 	VLOG(3) << "Creating OMM provider.";
@@ -185,32 +196,35 @@ gomi::provider_t::Send (
 	unsigned i = 0;
 	boost::shared_lock<boost::shared_mutex> stream_lock (stream.lock);
 	const auto now = boost::posix_time::second_clock::universal_time();
-/* first iteration without AttribInfo */
-	std::for_each (stream.requests.begin(), stream.requests.end(),
-		[&](std::pair<rfa::sessionLayer::RequestToken*const, std::shared_ptr<request_t>>& request)
+
 	{
-		if (request.second->is_muted || request.second->use_attribinfo_in_updates)
-			return;
-		DCHECK(request.second->is_streaming);
-		Send (static_cast<rfa::common::Msg&> (msg), *(request.first), nullptr);
-		auto client = request.second->client.lock();
-		if ((bool)client) {
-			client->cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT]++;
-			client->last_activity_ = now;
-		}
-		++i;
-	});
-/* second iteration with AttribInfo */
+/* first iteration without AttribInfo */
+		std::for_each (stream.requests.begin(), stream.requests.end(),
+			[&](std::pair<rfa::sessionLayer::RequestToken*const, std::shared_ptr<request_t>>& request)
+		{
+			if (!request.second->has_initial_image.load() || request.second->use_attribinfo_in_updates)
+				return;
+			DCHECK(request.second->is_streaming);
+			Submit (static_cast<rfa::common::Msg&> (msg), *(request.first), nullptr);
+			auto client = request.second->client.lock();
+			if ((bool)client) {
+				client->cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT]++;
+				client->last_activity_ = now;
+			}
+			++i;
+		});
+	}
 	if (i < stream.requests.size())
 	{
+/* second iteration with AttribInfo */
 		msg.setAttribInfo (attribInfo);
 		std::for_each (stream.requests.begin(), stream.requests.end(),
 		[&](std::pair<rfa::sessionLayer::RequestToken*const, std::shared_ptr<request_t>>& request)
 		{
-			if (request.second->is_muted || !request.second->use_attribinfo_in_updates)
+			if (!request.second->has_initial_image.load() || !request.second->use_attribinfo_in_updates)
 				return;
 			DCHECK(request.second->is_streaming);
-			Send (static_cast<rfa::common::Msg&> (msg), *(request.first), nullptr);
+			Submit (static_cast<rfa::common::Msg&> (msg), *(request.first), nullptr);
 			auto client = request.second->client.lock();
 			if ((bool)client) {
 				client->cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT]++;
@@ -227,7 +241,7 @@ gomi::provider_t::Send (
 /* Send an Rfa initial image to a single client.
  */
 bool
-gomi::provider_t::Send (
+gomi::provider_t::SendReply (
 	rfa::message::RespMsg& msg,
 	rfa::sessionLayer::RequestToken& token
 	)
@@ -249,14 +263,14 @@ gomi::provider_t::Send (
 /* lock updates for this stream */
 	boost::upgrade_lock<boost::shared_mutex> stream_lock (stream->lock);
 /* forward refresh image */
-	Send (static_cast<rfa::common::Msg&> (msg), token, nullptr);
+	Submit (static_cast<rfa::common::Msg&> (msg), token, nullptr);
 	cumulative_stats_[PROVIDER_PC_MSGS_SENT]++;
 	client->cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT]++;
 	client->last_activity_ = last_activity_ = boost::posix_time::second_clock::universal_time();
 	if (request->is_streaming)
 	{
 /* enable updates for this request */
-		request->is_muted = false;
+		request->has_initial_image.store (true);
 	}
 	else
 	{
@@ -272,19 +286,6 @@ gomi::provider_t::Send (
 	}
 /* unlock */
 	return true;
-}
-
-uint32_t
-gomi::provider_t::Send (
-	rfa::common::Msg& msg,
-	rfa::sessionLayer::RequestToken& token,
-	void* closure
-	)
-{
-	if (is_muted_)
-		return false;
-
-	return Submit (msg, token, closure);
 }
 
 /* 7.4.8 Sending response messages using an OMM provider.
@@ -522,7 +523,9 @@ gomi::provider_t::GetDirectoryResponse (
  */
 // not std::map :(  derived from rfa::common::Data
 	map_.clear();
-	GetServiceDirectory (&map_, rwf_major_version, rwf_minor_version, service_name, filter_mask);
+	DCHECK (map_it_.isInitialized());
+	map_it_.clear();
+	GetServiceDirectory (&map_, &map_it_, rwf_major_version, rwf_minor_version, service_name, filter_mask);
 	response->setPayload (map_);
 
 	status_.clear();
@@ -540,6 +543,7 @@ gomi::provider_t::GetDirectoryResponse (
 void
 gomi::provider_t::GetServiceDirectory (
 	rfa::data::Map* map,
+	rfa::data::SingleWriteIterator* it,
 	uint8_t rwf_major_version,
 	uint8_t rwf_minor_version,
 	const char* service_name,
@@ -558,69 +562,64 @@ gomi::provider_t::GetServiceDirectory (
 		return;
 	}
 
-/* Clear required for SingleWriteIterator state machine. */
-	auto& it = single_write_it_;
-	DCHECK (it.isInitialized());
-	it.clear();
-
 /* One service. */
 	map->setTotalCountHint (1);
 	map->setIndicationMask (rfa::data::Map::EntriesFlag);
 
-	it.start (*map, rfa::data::FilterListEnum);
+/* Clear required for SingleWriteIterator state machine. */
+	DCHECK (it->isInitialized());
+	it->start (map_, rfa::data::FilterListEnum);
 
 	rfa::data::MapEntry mapEntry (false);
 	rfa::data::DataBuffer dataBuffer (false);
-	rfa::data::FilterList filterList (false);
-
 /* Service name -> service filter list */
 	mapEntry.setAction (rfa::data::MapEntry::Add);
+/* iterator does not support direct writing for MapEntry value. */
 	dataBuffer.setFromString (serviceName, rfa::data::DataBuffer::StringAsciiEnum);
 	mapEntry.setKeyData (dataBuffer);
-	it.bind (mapEntry);
-	GetServiceFilterList (&filterList, rwf_major_version, rwf_minor_version, filter_mask);
+	it->bind (mapEntry);
+	GetServiceFilterList (it, rwf_major_version, rwf_minor_version, filter_mask);
 
-	it.complete();
+	it->complete();
 }
 
 void
 gomi::provider_t::GetServiceFilterList (
-	rfa::data::FilterList* filterList,
+	rfa::data::SingleWriteIterator* it,
 	uint8_t rwf_major_version,
 	uint8_t rwf_minor_version,
 	uint32_t filter_mask
 	)
 {
-/* 5.3.8 Encoding with a SingleWriteIterator
- * Re-use of SingleWriteIterator permitted cross MapEntry and FieldList.
- */
-	auto& it = single_write_it_;
-	rfa::data::FilterEntry filterEntry (false);
-	rfa::data::ElementList elementList (false);
-
-	filterList->setAssociatedMetaInfo (rwf_major_version, rwf_minor_version);
-	filterEntry.setAction (rfa::data::FilterEntry::Set);
-
 /* Determine entry count for encoder hinting */
 	const bool use_info_filter  = (0 != (filter_mask & rfa::rdm::SERVICE_INFO_FILTER));
 	const bool use_state_filter = (0 != (filter_mask & rfa::rdm::SERVICE_STATE_FILTER));
 	const unsigned filter_count = (use_info_filter ? 1 : 0) + (use_state_filter ? 1 : 0);
-	filterList->setTotalCountHint (filter_count);
+	
+/* 5.3.8 Encoding with a SingleWriteIterator
+ * Re-use of SingleWriteIterator permitted cross MapEntry and FieldList.
+ */
+	filterList_.setAssociatedMetaInfo (rwf_major_version, rwf_minor_version);
 
-	it.start (*filterList, rfa::data::ElementListEnum);  
+	DCHECK (it->isInitialized());
+	it->start (filterList_, rfa::data::ElementListEnum);  
+
+	rfa::data::FilterEntry filterEntry (false);
+	filterEntry.setAction (rfa::data::FilterEntry::Set);
+	filterList_.setTotalCountHint (filter_count);
 
 	if (use_info_filter) {
 		filterEntry.setFilterId (rfa::rdm::SERVICE_INFO_ID);
-		it.bind (filterEntry, rfa::data::ElementListEnum);
-		GetServiceInformation (&elementList, rwf_major_version, rwf_minor_version);
+		it->bind (filterEntry, rfa::data::ElementListEnum);
+		GetServiceInformation (it, rwf_major_version, rwf_minor_version);
 	}
 	if (use_state_filter) {
 		filterEntry.setFilterId (rfa::rdm::SERVICE_STATE_ID);
-		it.bind (filterEntry, rfa::data::ElementListEnum);
-		GetServiceState (&elementList, rwf_major_version, rwf_minor_version);
+		it->bind (filterEntry, rfa::data::ElementListEnum);
+		GetServiceState (it, rwf_major_version, rwf_minor_version);
 	}
 
-	it.complete();
+	it->complete();
 }
 
 /* SERVICE_INFO_ID
@@ -628,26 +627,25 @@ gomi::provider_t::GetServiceFilterList (
  */
 void
 gomi::provider_t::GetServiceInformation (
-	rfa::data::ElementList* elementList,
+	rfa::data::SingleWriteIterator* it,
 	uint8_t rwf_major_version,
 	uint8_t rwf_minor_version
 	)
 {
-	auto& it = single_write_it_;
+	elementList_.setAssociatedMetaInfo (rwf_major_version, rwf_minor_version);
+
+	DCHECK (it->isInitialized());
+	it->start (elementList_);
+
 	rfa::data::ElementEntry element (false);
-	rfa::data::Array array_ (false);
-
-	elementList->setAssociatedMetaInfo (rwf_major_version, rwf_minor_version);
-	it.start (*elementList);
-
 /* Name<AsciiString>
  * Service name. This will match the concrete service name or the service group
  * name that is in the Map.Key.
  */
 	element.setName (rfa::rdm::ENAME_NAME);
-	it.bind (element);
+	it->bind (element);
 	const RFA_String serviceName (config_.service_name.c_str(), 0, false);
-	it.setString (serviceName, rfa::data::DataBuffer::StringAsciiEnum);
+	it->setString (serviceName, rfa::data::DataBuffer::StringAsciiEnum);
 	
 /* Capabilities<Array of UInt>
  * Array of valid MessageModelTypes that the service can provide. The UInt
@@ -657,8 +655,8 @@ gomi::provider_t::GetServiceInformation (
  * service if the MessageModelType of the request is listed in this element.
  */
 	element.setName (rfa::rdm::ENAME_CAPABILITIES);
-	it.bind (element);
-	GetServiceCapabilities (&array_);
+	it->bind (element);
+	GetServiceCapabilities (it);
 
 /* DictionariesUsed<Array of AsciiString>
  * List of Dictionary names that may be required to process all of the data 
@@ -666,10 +664,10 @@ gomi::provider_t::GetServiceInformation (
  * the needs of the consumer (e.g. display application, caching application)
  */
 	element.setName (rfa::rdm::ENAME_DICTIONARYS_USED);
-	it.bind (element);
-	GetServiceDictionaries (&array_);
+	it->bind (element);
+	GetServiceDictionaries (it);
 
-	it.complete();
+	it->complete();
 }
 
 /* Array of valid MessageModelTypes that the service can provide.
@@ -677,40 +675,38 @@ gomi::provider_t::GetServiceInformation (
  */
 void
 gomi::provider_t::GetServiceCapabilities (
-	rfa::data::Array* capabilities
+	rfa::data::SingleWriteIterator* it
 	)
 {
-	auto& it = single_write_it_;
+	DCHECK (it->isInitialized());
+	it->start (array_, rfa::data::DataBuffer::UIntEnum);
+
 	rfa::data::ArrayEntry arrayEntry (false);
-
-	it.start (*capabilities, rfa::data::DataBuffer::UIntEnum);
-
 /* MarketPrice = 6 */
-	it.bind (arrayEntry);
-	it.setUInt (rfa::rdm::MMT_MARKET_PRICE);
+	it->bind (arrayEntry);
+	it->setUInt (rfa::rdm::MMT_MARKET_PRICE);
 
-	it.complete();
+	it->complete();
 }
 
 void
 gomi::provider_t::GetServiceDictionaries (
-	rfa::data::Array* dictionaries
+	rfa::data::SingleWriteIterator* it
 	)
 {
-	auto& it = single_write_it_;
+	DCHECK (it->isInitialized());
+	it->start (array_, rfa::data::DataBuffer::StringAsciiEnum);
+
 	rfa::data::ArrayEntry arrayEntry (false);
-
-	it.start (*dictionaries, rfa::data::DataBuffer::StringAsciiEnum);
-
 /* RDM Field Dictionary */
-	it.bind (arrayEntry);
-	it.setString (kRdmFieldDictionaryName, rfa::data::DataBuffer::StringAsciiEnum);
+	it->bind (arrayEntry);
+	it->setString (kRdmFieldDictionaryName, rfa::data::DataBuffer::StringAsciiEnum);
 
 /* Enumerated Type Dictionary */
-	it.bind (arrayEntry);
-	it.setString (kEnumTypeDictionaryName, rfa::data::DataBuffer::StringAsciiEnum);
+	it->bind (arrayEntry);
+	it->setString (kEnumTypeDictionaryName, rfa::data::DataBuffer::StringAsciiEnum);
 
-	it.complete();
+	it->complete();
 }
 
 /* SERVICE_STATE_ID
@@ -718,17 +714,17 @@ gomi::provider_t::GetServiceDictionaries (
  */
 void
 gomi::provider_t::GetServiceState (
-	rfa::data::ElementList* elementList,
+	rfa::data::SingleWriteIterator* it,
 	uint8_t rwf_major_version,
 	uint8_t rwf_minor_version
 	)
 {
-	auto& it = single_write_it_;
+	elementList_.setAssociatedMetaInfo (rwf_major_version, rwf_minor_version);
+
+	DCHECK (it->isInitialized());
+	it->start (elementList_);
+
 	rfa::data::ElementEntry element (false);
-
-	elementList->setAssociatedMetaInfo (rwf_major_version, rwf_minor_version);
-	it.start (*elementList);
-
 /* ServiceState<UInt>
  * 1: Up/Yes
  * 0: Down/No
@@ -736,8 +732,8 @@ gomi::provider_t::GetServiceState (
  * existing streams are left unchanged.
  */
 	element.setName (rfa::rdm::ENAME_SVC_STATE);
-	it.bind (element);
-	it.setUInt (1);
+	it->bind (element);
+	it->setUInt (1);
 
 /* AcceptingRequests<UInt>
  * 1: Yes
@@ -748,10 +744,10 @@ gomi::provider_t::GetServiceState (
  * existing streams are left unchanged.
  */
 	element.setName (rfa::rdm::ENAME_ACCEPTING_REQS);
-	it.bind (element);
-	it.setUInt (is_accepting_requests_ ? 1 : 0);
+	it->bind (element);
+	it->setUInt (is_accepting_requests_ ? 1 : 0);
 
-	it.complete();
+	it->complete();
 }
 
 /* 7.5.8.2 Handling CmdError Events.

@@ -71,14 +71,14 @@ gomi::client_t::GetAssociatedMetaInfo()
 	last_activity_ = boost::posix_time::second_clock::universal_time();
 
 /* Store negotiated Reuters Wire Format version information. */
-	rfa::data::Map map;
+	auto& map = provider_.map_;
 	map.setAssociatedMetaInfo (*handle_);
 	rwf_major_version_ = map.getMajorVersion();
 	rwf_minor_version_ = map.getMinorVersion();
 	LOG(INFO) << prefix_ <<
 		"RWF: { "
-		  "\"MajorVersion\": " << (unsigned)rwf_major_version_ <<
-		", \"MinorVersion\": " << (unsigned)rwf_minor_version_ <<
+		  "\"MajorVersion\": " << (unsigned)GetRwfMajorVersion() <<
+		", \"MinorVersion\": " << (unsigned)GetRwfMinorVersion() <<
 		" }";
 	return true;
 }
@@ -286,20 +286,23 @@ gomi::client_t::RejectLogin (
 	VLOG(2) << prefix_ << "Sending MMT_LOGIN rejection.";
 
 /* 7.5.9.1 Create a response message (4.2.2) */
-	rfa::message::RespMsg response;
+	auto& response = provider_.response_;
+	response.clear();
 /* 7.5.9.2 Set the message model type of the response. */
 	response.setMsgModelType (rfa::rdm::MMT_LOGIN);
 /* 7.5.9.3 Set response type.  RDM 3.2.2 RespMsg: Status when rejecting login. */
 	response.setRespType (rfa::message::RespMsg::StatusEnum);
 
 /* 7.5.9.5 Create or re-use a request attribute object (4.2.4) */
-	rfa::message::AttribInfo attribInfo;
+	auto& attribInfo = provider_.attribInfo_;
+	attribInfo.clear();
 /* RDM 3.2.4 AttribInfo: Name is required, NameType is recommended: default is USER_NAME (1) */
 	attribInfo.setNameType (login_msg.getAttribInfo().getNameType());
 	attribInfo.setName (login_msg.getAttribInfo().getName());
 	response.setAttribInfo (attribInfo);
 
-	rfa::common::RespStatus status;
+	auto& status = provider_.status_;
+	status.clear();
 /* Item interaction state: RDM 3.2.2 RespMsg: Closed or ClosedRecover. */
 	status.setStreamState (rfa::common::RespStatus::ClosedEnum);
 /* Data quality state: RDM 3.2.2 RespMsg: Suspect. */
@@ -328,7 +331,7 @@ gomi::client_t::RejectLogin (
 			" }";
 	}
 
-	Submit (static_cast<rfa::common::Msg&> (response), login_token, nullptr);
+	Submit (response, login_token, nullptr);
 	cumulative_stats_[CLIENT_PC_MMT_LOGIN_REJECTED]++;
 	return true;
 }
@@ -351,7 +354,8 @@ gomi::client_t::AcceptLogin (
 	VLOG(2) << prefix_ << "Sending MMT_LOGIN accepted.";
 
 /* 7.5.9.1 Create a response message (4.2.2) */
-	rfa::message::RespMsg response;
+	auto& response = provider_.response_;
+	response.clear();
 /* 7.5.9.2 Set the message model type of the response. */
 	response.setMsgModelType (rfa::rdm::MMT_LOGIN);
 /* 7.5.9.3 Set response type.  RDM 3.2.2 RespMsg: Refresh when accepting login. */
@@ -359,16 +363,22 @@ gomi::client_t::AcceptLogin (
 	response.setIndicationMask (rfa::message::RespMsg::RefreshCompleteFlag);
 
 /* 7.5.9.5 Create or re-use a request attribute object (4.2.4) */
-	rfa::message::AttribInfo attribInfo;
+	auto& attribInfo = provider_.attribInfo_;
+	attribInfo.clear();
 /* RDM 3.2.4 AttribInfo: Name is required, NameType is recommended: default is USER_NAME (1) */
 	attribInfo.setNameType (login_msg.getAttribInfo().getNameType());
 	attribInfo.setName (login_msg.getAttribInfo().getName());
+
+	auto& elementList = provider_.elementList_;
+	elementList.setAssociatedMetaInfo (GetRwfMajorVersion(), GetRwfMinorVersion());
+/* Clear required for SingleWriteIterator state machine. */
+	auto& it = provider_.element_it_;
+	DCHECK (it.isInitialized());
+	it.clear();
+	it.start (elementList);
+
 /* RDM 3.3.2 Login Response Elements */
-	rfa::data::ElementList el;
-	rfa::data::ElementListWriteIterator it;
-	rfa::data::ElementEntry entry;
-	rfa::data::DataBuffer dataBuffer;
-	it.start (el);
+	rfa::data::ElementEntry entry (false);
 /* Reflect back DACS authentication parameters. */
 	if (login_msg.getAttribInfo().getHintMask() & rfa::message::AttribInfo::AttribFlag)
 	{
@@ -376,24 +386,20 @@ gomi::client_t::AcceptLogin (
 	}
 /* Images and & updates could be stale. */
 	entry.setName (rfa::rdm::ENAME_ALLOW_SUSPECT_DATA);
-	dataBuffer.setUInt (1);
-	entry.setData (dataBuffer);
 	it.bind (entry);
+	it.setUInt (1);
 /* No permission expressions. */
 	entry.setName (rfa::rdm::ENAME_PROV_PERM_EXP);
-	dataBuffer.setUInt (0);
-	entry.setData (dataBuffer);
 	it.bind (entry);
+	it.setUInt (0);
 /* No permission profile. */
 	entry.setName (rfa::rdm::ENAME_PROV_PERM_PROF);
-	dataBuffer.setUInt (0);
-	entry.setData (dataBuffer);
 	it.bind (entry);
+	it.setUInt (0);
 /* Downstream application drives stream recovery. */
 	entry.setName (rfa::rdm::ENAME_SINGLE_OPEN);
-	dataBuffer.setUInt (0);
-	entry.setData (dataBuffer);
 	it.bind (entry);
+	it.setUInt (0);
 /* Batch requests not supported. */
 /* OMM posts not supported. */
 /* Optimized pause and resume not supported. */
@@ -401,10 +407,11 @@ gomi::client_t::AcceptLogin (
 /* Warm standby not supported. */
 /* Binding complete. */
 	it.complete();
-	attribInfo.setAttrib (el);
+	attribInfo.setAttrib (elementList);
 	response.setAttribInfo (attribInfo);
 
-	rfa::common::RespStatus status;
+	auto& status = provider_.status_;
+	status.clear();
 /* Item interaction state: RDM 3.2.2 RespMsg: Open. */
 	status.setStreamState (rfa::common::RespStatus::OpenEnum);
 /* Data quality state: RDM 3.2.2 RespMsg: Ok. */
@@ -433,7 +440,7 @@ gomi::client_t::AcceptLogin (
 			" }";
 	}
 
-	Submit (static_cast<rfa::common::Msg&> (response), login_token, nullptr);
+	Submit (response, login_token, nullptr);
 	cumulative_stats_[CLIENT_PC_MMT_LOGIN_ACCEPTED]++;
 	return true;
 }
@@ -683,8 +690,8 @@ gomi::client_t::OnItemRequest (
 				stream->requests.emplace (std::make_pair (&request_token, client_request));	/* strong */
 
 /* forward request to worker pool */
-				provider::Request request;
-				zmq_msg_t msg;
+				auto& request = provider_.request_;
+				auto& msg = provider_.msg_;
 				request.set_msg_type (provider::Request::MSG_REFRESH);
 				request.mutable_refresh()->set_token ((uintptr_t)&request_token);
 				request.mutable_refresh()->set_service_id (service_id);
@@ -692,11 +699,14 @@ gomi::client_t::OnItemRequest (
 				request.mutable_refresh()->set_item_name (item_name, item_name_len);
 				request.mutable_refresh()->set_rwf_major_version (rwf_major_version_);
 				request.mutable_refresh()->set_rwf_minor_version (rwf_minor_version_);
-				zmq_msg_init_size (&msg, request.ByteSize());
+				int rc = zmq_msg_init_size (&msg, request.ByteSize());
+				CHECK(0 == rc);
 				request.SerializeToArray (zmq_msg_data (&msg), (int)zmq_msg_size (&msg));
 				auto sock = provider_.sender_.get();
-				zmq_send (sock, &msg, 0);
-				zmq_msg_close (&msg);
+				rc = zmq_send (sock, &msg, 0);
+				CHECK(0 == rc);
+				rc = zmq_msg_close (&msg);
+				CHECK(0 == rc);
 			}
 		}
 /* ignore any error */
@@ -794,7 +804,7 @@ gomi::client_t::SendDirectoryResponse (
 	}
 
 /* Create and throw away first token for MMT_DIRECTORY. */
-	Submit (static_cast<rfa::common::Msg&> (response), request_token, nullptr);
+	Submit (response, request_token, nullptr);
 	cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_SENT]++;
 	return true;
 }
@@ -818,8 +828,8 @@ gomi::client_t::SendClose (
 		", \"StatusCode\": " << (int)status_code <<
 		" }";
 /* 7.5.9.1 Create a response message (4.2.2) */
-	rfa::message::RespMsg response (false);	/* reference */
-
+	auto& response = provider_.response_;
+	response.clear();
 /* 7.5.9.2 Set the message model type of the response. */
 	response.setMsgModelType (model_type);
 /* 7.5.9.3 Set response type. */
@@ -831,7 +841,8 @@ gomi::client_t::SendClose (
  */
 	if (use_attribinfo_in_updates) {
 /* 7.5.9.5 Create or re-use a request attribute object (4.2.4) */
-		rfa::message::AttribInfo attribInfo;
+		auto& attribInfo = provider_.attribInfo_;
+		attribInfo.clear();
 		attribInfo.setNameType (rfa::rdm::INSTRUMENT_NAME_RIC);
 		const RFA_String name (name_c, 0, false);	/* reference */
 		attribInfo.setServiceID (service_id);
@@ -839,7 +850,8 @@ gomi::client_t::SendClose (
 		response.setAttribInfo (attribInfo);
 	}
 	
-	rfa::common::RespStatus status;
+	auto& status = provider_.status_;
+	status.clear();
 /* Item interaction state: Open, Closed, ClosedRecover, Redirected, NonStreaming, or Unspecified. */
 	status.setStreamState (rfa::common::RespStatus::ClosedEnum);
 /* Data quality state: Ok, Suspect, or Unspecified. */
@@ -870,7 +882,7 @@ gomi::client_t::SendClose (
 	}
 #endif
 
-	Submit (static_cast<rfa::common::Msg&> (response), request_token, nullptr);	
+	Submit (response, request_token, nullptr);	
 	cumulative_stats_[CLIENT_PC_ITEM_CLOSED]++;
 	return true;
 }
@@ -879,12 +891,12 @@ gomi::client_t::SendClose (
  */
 uint32_t
 gomi::client_t::Submit (
-	rfa::common::Msg& msg,
+	rfa::message::RespMsg& response,
 	rfa::sessionLayer::RequestToken& token,
 	void* closure
 	)
 {
-	return provider_.Submit (msg, token, closure);
+	return provider_.Submit (static_cast<rfa::common::Msg&> (response), token, closure);
 }
 
 /* eof */

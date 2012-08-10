@@ -513,7 +513,7 @@ protected:
 				      " }";
 		}
 #endif
-		provider_->Send (response_, token);
+		provider_->SendReply (response_, token);
 		VLOG(3) << prefix_ << "Response sent.";
 	}
 
