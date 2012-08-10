@@ -279,12 +279,12 @@ public:
 
 			try {
 /* forward to main application */
-				ProcessRequest (*reinterpret_cast<rfa::sessionLayer::RequestToken*> ((uintptr_t)request_.refresh().token()),
-						request_.refresh().service_id(),
-						request_.refresh().model_type(),
-						request_.refresh().item_name().c_str(),
-						request_.refresh().rwf_major_version(),
-						request_.refresh().rwf_minor_version());
+				OnRequest (*reinterpret_cast<rfa::sessionLayer::RequestToken*> ((uintptr_t)request_.refresh().token()),
+					   request_.refresh().service_id(),
+					   request_.refresh().model_type(),
+					   request_.refresh().item_name().c_str(),
+					   request_.refresh().rwf_major_version(),
+					   request_.refresh().rwf_minor_version());
 			} catch (std::exception& e) {
 				LOG(ERROR) << prefix_ << "ProcessRequest::Exception: { "
 					"\"What\": \"" << e.what() << "\""
@@ -371,7 +371,7 @@ protected:
 		}
 	}
 
-	void Send (
+	void SendReply (
 		const bin_t& bin,
 		const RFA_String& stream_name,
 		uint8_t rwf_major_version,
@@ -517,7 +517,7 @@ protected:
 		VLOG(3) << prefix_ << "Response sent.";
 	}
 
-	void ProcessRequest (
+	void OnRequest (
 		rfa::sessionLayer::RequestToken& request_token,
 		uint32_t service_id,
 		uint8_t model_type,
@@ -573,7 +573,7 @@ protected:
 			bin_t bin (bin_decl, directory_it->second->handle, kDefaultLastPriceField, kDefaultTickVolumeField);
 			VLOG(2) << prefix_ << "Processing bin: " << bin_decl;
 			bin.Calculate (start_date, work_area_.get(), view_element_.get());
-			Send (bin, stream_name, rwf_major_version, rwf_minor_version, request_token);
+			SendReply (bin, stream_name, rwf_major_version, rwf_minor_version, request_token);
 		} catch (rfa::common::InvalidUsageException& e) {
 			LOG(ERROR) << prefix_ << "InvalidUsageException: { " <<
 					"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
