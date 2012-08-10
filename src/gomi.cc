@@ -169,11 +169,11 @@ public:
 		const boost::local_time::tz_database& tzdb,
 		const boost::local_time::time_zone_ptr TZ,
 		const config_t& config,
-		std::shared_ptr<void>& context,
+		std::shared_ptr<void>& zmq_context,
 		unsigned id
 	) :
 		id_ (id),
-		context_ (context),
+		zmq_context_ (zmq_context),
 		manager_ (nullptr),
 		response_ (false),	/* reference */
 		fields_ (false),
@@ -190,59 +190,22 @@ public:
 		prefix_.assign (ss.str());
 	}
 
-	void operator()()
+	~worker_t()
 	{
-		provider::Request request;
-
-		Init();
-		LOG(INFO) << prefix_ << "Accepting requests.";
-
-		while (true)
-		{
-			if (!GetRequest (&request))
-				continue;
-			if (request.msg_type() == provider::Request::MSG_ABORT) {
-				LOG(INFO) << prefix_ << "Received interrupt request.";
-				break;
-			}
-			if (!(request.msg_type() == provider::Request::MSG_REFRESH
-				&& request.has_refresh()))
-			{
-				LOG(ERROR) << prefix_ << "Received unknown request.";
-				continue;
-			}
-			VLOG(1) << prefix_ << "Received request \"" << request.refresh().item_name() << "\"";
-			DVLOG(1) << prefix_ << request.DebugString();
-
-			try {
-/* forward to main application */
-				ProcessRequest (*reinterpret_cast<rfa::sessionLayer::RequestToken*> ((uintptr_t)request.refresh().token()),
-						request.refresh().service_id(),
-						request.refresh().model_type(),
-						request.refresh().item_name().c_str(),
-						request.refresh().rwf_major_version(),
-						request.refresh().rwf_minor_version());
-			} catch (std::exception& e) {
-				LOG(ERROR) << prefix_ << "ProcessRequest::Exception: { "
-					"\"What\": \"" << e.what() << "\""
-					" }";
-			}
-		}
-
-		LOG(INFO) << prefix_ << "Worker closed.";
+/* shutdown socket before context */
+		CHECK (receiver_.use_count() <= 1);
+		receiver_.reset();
+		zmq_context_.reset();
 	}
 
-	unsigned GetId() const { return id_; }
-
-protected:
-	void Init()
+	bool Init()
 	{
 		std::function<int(void*)> zmq_close_deleter = zmq_close;
 		int rc;
 
 		try {
 /* Setup 0mq sockets */
-			receiver_.reset (zmq_socket (context_.get(), ZMQ_PULL), zmq_close_deleter);
+			receiver_.reset (zmq_socket (zmq_context_.get(), ZMQ_PULL), zmq_close_deleter);
 			CHECK((bool)receiver_);
 			rc = zmq_connect (receiver_.get(), "inproc://gomi/refresh");
 			CHECK(0 == rc);
@@ -253,6 +216,7 @@ protected:
 			LOG(ERROR) << prefix_ << "ZeroMQ::Exception: { "
 				"\"What\": \"" << e.what() << "\""
 				" }";
+			return false;
 		}
 
 		try {
@@ -271,6 +235,7 @@ protected:
 				", \"Classification\": \"" << classification_string (e.getClassification()) << "\""
 				", \"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 				" }";
+			return false;
 		}
 
 		try {
@@ -286,9 +251,53 @@ protected:
 			LOG(ERROR) << prefix_ << "FlexRecord::Exception: { "
 				"\"What\": \"" << e.what() << "\""
 				" }";
+			return false;
 		}
+
+		return true;
 	}
 
+	void Run (void)
+	{
+		LOG(INFO) << prefix_ << "Accepting requests.";
+		while (true)
+		{
+			if (!GetRequest (&request_))
+				continue;
+			if (request_.msg_type() == provider::Request::MSG_ABORT) {
+				LOG(INFO) << prefix_ << "Received interrupt request.";
+				break;
+			}
+			if (!(request_.msg_type() == provider::Request::MSG_REFRESH
+				&& request_.has_refresh()))
+			{
+				LOG(ERROR) << prefix_ << "Received unknown request.";
+				continue;
+			}
+			VLOG(1) << prefix_ << "Received request \"" << request_.refresh().item_name() << "\"";
+			DVLOG(1) << prefix_ << request_.DebugString();
+
+			try {
+/* forward to main application */
+				ProcessRequest (*reinterpret_cast<rfa::sessionLayer::RequestToken*> ((uintptr_t)request_.refresh().token()),
+						request_.refresh().service_id(),
+						request_.refresh().model_type(),
+						request_.refresh().item_name().c_str(),
+						request_.refresh().rwf_major_version(),
+						request_.refresh().rwf_minor_version());
+			} catch (std::exception& e) {
+				LOG(ERROR) << prefix_ << "ProcessRequest::Exception: { "
+					"\"What\": \"" << e.what() << "\""
+					" }";
+			}
+		}
+
+		LOG(INFO) << prefix_ << "Worker closed.";
+	}
+
+	unsigned GetId() const { return id_; }
+
+protected:
 	bool GetRequest (provider::Request* request)
 	{
 		int rc;
@@ -582,13 +591,14 @@ protected:
 	std::string prefix_;
 
 /* 0mq context */
-	std::shared_ptr<void> context_;
+	std::shared_ptr<void> zmq_context_;
 
 /* Socket to receive refresh requests on. */
 	std::shared_ptr<void> receiver_;
 
 /* Incoming 0mq message */
 	zmq_msg_t msg_;
+	provider::Request request_;
 
 /* RIC decomposition */
 	url_parse::Parsed parsed_;
@@ -832,7 +842,7 @@ gomi::gomi_t::init()
 			auto worker = std::make_shared<worker_t> (provider_, directory_, tzdb_, TZ_, config_, zmq_context_, worker_id);
 			if (!(bool)worker)
 				return false;
-			auto thread = std::make_shared<boost::thread> (*worker.get());
+			auto thread = std::make_shared<boost::thread> ([worker](){ if (worker->Init()) worker->Run(); });
 			if (!(bool)thread)
 				return false;
 			workers_.emplace_front (std::make_pair (worker, thread));
