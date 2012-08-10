@@ -925,8 +925,6 @@ gomi::gomi_t::clear()
 		}
 		LOG(INFO) << "All worker threads joined.";
 	}
-	abort_sock_.reset();
-	zmq_context_.reset();
 
 /* Close SNMP agent. */
 	snmp_agent_.reset();
@@ -942,8 +940,11 @@ gomi::gomi_t::clear()
 	event_thread_.reset();
 	event_pump_.reset();
 	directory_.clear();
+/* Release 0mq sockets before context */
 	assert (provider_.use_count() <= 1);
 	provider_.reset();
+	abort_sock_.reset();
+	zmq_context_.reset();
 	assert (log_.use_count() <= 1);
 	log_.reset();
 	assert (event_queue_.use_count() <= 1);
