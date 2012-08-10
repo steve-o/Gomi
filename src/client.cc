@@ -62,7 +62,7 @@ gomi::client_t::init (
 {
 /* save non-const client session handle. */
 	handle_ = handle;
-/* zmq send socket */
+/* zmq send socket for forwarding image requests. */
 	sender_ = sender;
 	return true;
 }

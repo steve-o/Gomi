@@ -176,12 +176,18 @@ public:
 		context_ (context),
 		manager_ (nullptr),
 		response_ (false),	/* reference */
+		fields_ (false),
+		attribInfo_ (false),
 		provider_ (provider),
 		directory_ (directory),
 		tzdb_ (tzdb),
 		TZ_ (TZ),
 		config_ (config)
 	{
+/* Set logger ID */
+		std::ostringstream ss;
+		ss << "Worker " << std::hex << std::setiosflags (std::ios_base::showbase) << id << ':';
+		prefix_.assign (ss.str());
 	}
 
 	void operator()()
@@ -189,41 +195,41 @@ public:
 		provider::Request request;
 
 		Init();
-		LOG(INFO) << "Thread #" << id_ << ": Accepting requests.";
+		LOG(INFO) << prefix_ << "Accepting requests.";
 
 		while (true)
 		{
 			if (!GetRequest (&request))
 				continue;
 			if (request.msg_type() == provider::Request::MSG_ABORT) {
-				LOG(INFO) << "Thread #" << id_ << ": Received interrupt request.";
+				LOG(INFO) << prefix_ << "Received interrupt request.";
 				break;
 			}
 			if (!(request.msg_type() == provider::Request::MSG_REFRESH
 				&& request.has_refresh()))
 			{
-				LOG(ERROR) << "Thread #" << id_ << ": Received unknown request.";
+				LOG(ERROR) << prefix_ << "Received unknown request.";
 				continue;
 			}
-			VLOG(1) << "Thread #" << id_ << ": Received request \"" << request.refresh().item_name() << "\"";
-			DVLOG(1) << request.DebugString();
+			VLOG(1) << prefix_ << "Received request \"" << request.refresh().item_name() << "\"";
+			DVLOG(1) << prefix_ << request.DebugString();
 
 			try {
 /* forward to main application */
-				rfa::sessionLayer::RequestToken* request_token = reinterpret_cast<rfa::sessionLayer::RequestToken*> ((uintptr_t)request.refresh().token());
-				const uint32_t service_id = request.refresh().service_id();
-				const uint8_t model_type = request.refresh().model_type();
-				const char* name_c = request.refresh().item_name().c_str();
-				const uint8_t rwf_major_version = request.refresh().rwf_major_version();
-				const uint8_t rwf_minor_version = request.refresh().rwf_minor_version();
-				ProcessRequest (*request_token, service_id, model_type, name_c, rwf_major_version, rwf_minor_version);
+				ProcessRequest (*reinterpret_cast<rfa::sessionLayer::RequestToken*> ((uintptr_t)request.refresh().token()),
+						request.refresh().service_id(),
+						request.refresh().model_type(),
+						request.refresh().item_name().c_str(),
+						request.refresh().rwf_major_version(),
+						request.refresh().rwf_minor_version());
 			} catch (std::exception& e) {
-				LOG(ERROR) << "Request::Exception: { "
-					"\"What\": \"" << e.what() << "\" }";
+				LOG(ERROR) << prefix_ << "ProcessRequest::Exception: { "
+					"\"What\": \"" << e.what() << "\""
+					" }";
 			}
 		}
 
-		LOG(INFO) << "Thread #" << id_ << ": Worker closed.";
+		LOG(INFO) << prefix_ << "Worker closed.";
 	}
 
 	unsigned GetId() const { return id_; }
@@ -244,8 +250,9 @@ protected:
 			rc = zmq_connect (receiver_.get(), "inproc://gomi/abort");
 			CHECK(0 == rc);
 		} catch (std::exception& e) {
-			LOG(ERROR) << "ZeroMQ::Exception: { "
-				"\"What\": \"" << e.what() << "\" }";
+			LOG(ERROR) << prefix_ << "ZeroMQ::Exception: { "
+				"\"What\": \"" << e.what() << "\""
+				" }";
 		}
 
 		try {
@@ -259,7 +266,7 @@ protected:
 			single_write_it_->initialize (*fields_.get(), config_.maximum_data_size);
 			CHECK (single_write_it_->isInitialized());
 		} catch (rfa::common::InvalidUsageException& e) {
-			LOG(ERROR) << "InvalidUsageException: { "
+			LOG(ERROR) << prefix_ << "InvalidUsageException: { "
 				  "\"Severity\": \"" << severity_string (e.getSeverity()) << "\""
 				", \"Classification\": \"" << classification_string (e.getClassification()) << "\""
 				", \"StatusText\": \"" << e.getStatus().getStatusText() << "\""
@@ -273,11 +280,12 @@ protected:
 			view_element_.reset (manager_->AcquireView(), [this](FlexRecViewElement* view_element){ manager_->ReleaseView (view_element); });
 
 			if (!manager_->GetView ("Trade", view_element_->view)) {
-				LOG(ERROR) << "FlexRecDefinitionManager::GetView failed";
+				LOG(ERROR) << prefix_ << "FlexRecDefinitionManager::GetView failed";
 			}
 		} catch (std::exception& e) {
-			LOG(ERROR) << "FlexRecord::Exception: { "
-				"\"What\": \"" << e.what() << "\" }";
+			LOG(ERROR) << prefix_ << "FlexRecord::Exception: { "
+				"\"What\": \"" << e.what() << "\""
+				" }";
 		}
 	}
 
@@ -287,11 +295,11 @@ protected:
 
 		rc = zmq_msg_init (&msg_);
 		CHECK(0 == rc);
-		VLOG(1) << "Thread #" << id_ << ": Awaiting new job.";
+		VLOG(1) << prefix_ << "Awaiting new job.";
 		rc = zmq_recv (receiver_.get(), &msg_, 0);
 		CHECK(0 == rc);
 		if (!request->ParseFromArray (zmq_msg_data (&msg_), (int)zmq_msg_size (&msg_))) {
-			LOG(ERROR) << "Thread #" << id_ << ": Received invalid request.";
+			LOG(ERROR) << prefix_ << "Received invalid request.";
 			rc = zmq_msg_close (&msg_);
 			CHECK(0 == rc);
 			return false;
@@ -490,14 +498,14 @@ protected:
 			if (rfa::message::MsgValidationWarning == validation_status)
 				LOG(ERROR) << prefix_ << "validateMsg: { \"warningText\": \"" << warningText << "\" }";
 		} catch (rfa::common::InvalidUsageException& e) {
-			LOG(ERROR) << "InvalidUsageException: { " <<
+			LOG(ERROR) << prefix_ << "InvalidUsageException: { " <<
 					   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 					", " << response_ <<
 				      " }";
 		}
 #endif
 		provider_->send (response_, token);
-		VLOG(3) << "Response sent.";
+		VLOG(3) << prefix_ << "Response sent.";
 	}
 
 	void ProcessRequest (
@@ -509,7 +517,7 @@ protected:
 		uint8_t rwf_minor_version
 		)
 	{
-		VLOG(2) << "Bin request: { "
+		VLOG(2) << prefix_ << "Bin request: { "
 			  "\"RequestToken\": \"" << (intptr_t)&request_token << "\""
 			", \"ServiceID\": " << service_id <<
 			", \"MsgModelType\": " << (int)model_type <<
@@ -554,23 +562,24 @@ protected:
 /* run analytic on bin and send result */
 		try {
 			bin_t bin (bin_decl, directory_it->second->handle, kDefaultLastPriceField, kDefaultTickVolumeField);
-			VLOG(2) << "Processing bin: " << bin_decl;
+			VLOG(2) << prefix_ << "Processing bin: " << bin_decl;
 			bin.Calculate (start_date, work_area_.get(), view_element_.get());
 			Send (bin, stream_name, rwf_major_version, rwf_minor_version, request_token);
 		} catch (rfa::common::InvalidUsageException& e) {
-			LOG(ERROR) << "InvalidUsageException: { " <<
+			LOG(ERROR) << prefix_ << "InvalidUsageException: { " <<
 					"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 					" }";
 		} catch (std::exception& e) {
-			LOG(ERROR) << "Calculate::Exception: { "
+			LOG(ERROR) << prefix_ << "Calculate::Exception: { "
 					"\"What\": \"" << e.what() << "\""
 					" }";
 		}
-		VLOG(2) << "Request complete.";
+		VLOG(2) << prefix_ << "Request complete.";
 	}
 
 /* worker unique identifier */
 	const unsigned id_;
+	std::string prefix_;
 
 /* 0mq context */
 	std::shared_ptr<void> context_;
