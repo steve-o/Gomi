@@ -223,6 +223,7 @@ public:
 /* Pre-allocate memory buffer for RFA payload iterator */
 			fields_ = std::make_shared<rfa::data::FieldList> ();
 			CHECK ((bool)fields_);
+			fields_->setInfo (kDictionaryId, kFieldListId);
 
 			CHECK (config_.maximum_data_size > 0);
 			single_write_it_ = std::make_shared<rfa::data::SingleWriteIterator> ();
@@ -268,7 +269,7 @@ public:
 				LOG(INFO) << prefix_ << "Received interrupt request.";
 				break;
 			}
-			if (!(request_.msg_type() == provider::Request::MSG_REFRESH
+			if (!(request_.msg_type() == provider::Request::MSG_SNAPSHOT
 				&& request_.has_refresh()))
 			{
 				LOG(ERROR) << prefix_ << "Received unknown request.";
@@ -401,7 +402,6 @@ protected:
 /* 4.3.1 RespMsg.Payload */
 // not std::map :(  derived from rfa::common::Data
 		fields_->setAssociatedMetaInfo (rwf_major_version, rwf_minor_version);
-		fields_->setInfo (kDictionaryId, kFieldListId);
 
 /* TIMEACT & ACTIV_DATE */
 		struct tm _tm;

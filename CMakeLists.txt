@@ -29,7 +29,7 @@ set(NETSNMP_LIBRARIES
 )
 
 # TREP-VA 7.0 SDK
-set(VHAYU_ROOT C:/Vhayu)
+set(VHAYU_ROOT D:/Vhayu-7.0.5)
 set(VHAYU_INCLUDE_DIRS
 	${VHAYU_ROOT}/Engine/TBSDK/Include
 	${VHAYU_ROOT}/Engine/ThirdParty/xerces-c-3.1.1-x86_64-windows-vc-10.0/include

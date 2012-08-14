@@ -692,7 +692,7 @@ gomi::client_t::OnItemRequest (
 /* forward request to worker pool */
 				auto& request = provider_.request_;
 				auto& msg = provider_.msg_;
-				request.set_msg_type (provider::Request::MSG_REFRESH);
+				request.set_msg_type (provider::Request::MSG_SNAPSHOT);
 				request.mutable_refresh()->set_token ((uintptr_t)&request_token);
 				request.mutable_refresh()->set_service_id (service_id);
 				request.mutable_refresh()->set_model_type (model_type);
