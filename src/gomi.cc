@@ -160,13 +160,13 @@ gomi::gomi_t::~gomi_t()
 	boost::unique_lock<boost::shared_mutex> (global_list_lock_);
 	global_list_.remove (this);
 
-	clear();
+	Clear();
 }
 
 /* is bin not a 10-minute time period, i.e. a realtime component.
  */
 bool
-gomi::gomi_t::is_special_bin (const gomi::bin_decl_t& bin)
+gomi::gomi_t::IsSpecialBin (const gomi::bin_decl_t& bin)
 {
 	assert (!bin.bin_name.empty());
 	auto it = config_.realtime_fids.find (bin.bin_name);
@@ -204,33 +204,46 @@ gomi::gomi_t::init (
 		is_shutdown_ = true;
 		throw vpf::UserPluginException ("Invalid configuration, aborting.");
 	}
-	if (!init()) {
-		clear();
+	if (!Init()) {
+		Clear();
 		is_shutdown_ = true;
 		throw vpf::UserPluginException ("Initialization failed, aborting.");
 	}
 }
 
 bool
-gomi::gomi_t::init()
+gomi::gomi_t::Init()
 {
 	std::vector<std::string> symbolmap;
 
 	LOG(INFO) << config_;
 
+	try {
 /* FlexRecord cursor */
-	manager_ = FlexRecDefinitionManager::GetInstance (nullptr);
-	work_area_.reset (manager_->AcquireWorkArea(), [this](FlexRecWorkAreaElement* work_area){ manager_->ReleaseWorkArea (work_area); });
-	view_element_.reset (manager_->AcquireView(), [this](FlexRecViewElement* view_element){ manager_->ReleaseView (view_element); });
+		manager_ = FlexRecDefinitionManager::GetInstance (nullptr);
+		work_area_.reset (manager_->AcquireWorkArea(), [this](FlexRecWorkAreaElement* work_area){ manager_->ReleaseWorkArea (work_area); });
+		view_element_.reset (manager_->AcquireView(), [this](FlexRecViewElement* view_element){ manager_->ReleaseView (view_element); });
 
-	if (!manager_->GetView ("Trade", view_element_->view)) {
-		LOG(ERROR) << "FlexRecDefinitionManager::GetView failed";
+		if (!manager_->GetView ("Trade", view_element_->view)) {
+			LOG(ERROR) << "FlexRecDefinitionManager::GetView failed";
+			return false;
+		}
+	} catch (std::exception& e) {
+		LOG(ERROR) << "FlexRecord::Exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
 		return false;
 	}
 
 /* Boost time zone database. */
 	try {
 		tzdb_.load_from_file (config_.tzdb);
+/* default time zone */
+		TZ_ = tzdb_.time_zone_from_region (config_.tz);
+		if (nullptr == TZ_) {
+			LOG(ERROR) << "TZ not listed within configured time zone specifications.";
+			return false;
+		}
 	} catch (boost::local_time::data_not_accessible& e) {
 		LOG(ERROR) << "Time zone specifications cannot be loaded: " << e.what();
 		return false;
@@ -239,28 +252,33 @@ gomi::gomi_t::init()
 		return false;
 	}
 
-/* default time zone */
-	TZ_ = tzdb_.time_zone_from_region (config_.tz);
-	if (nullptr == TZ_) {
-		LOG(ERROR) << "TZ not listed within configured time zone specifications.";
+	try {
+/* /bin/ declarations */
+		const auto day_count = std::stoi (config_.day_count);
+		for (auto it = config_.bins.begin(); it != config_.bins.end(); ++it)
+		{
+			bin_decl_t bin;
+			if (!ParseBinDecl (*it, TZ_, day_count, &bin)) {
+				LOG(ERROR) << "Cannot parse bin delcs.";
+				return false;
+			}
+			bins_.insert (bin);
+		}
+	} catch (std::exception& e) {
+		LOG(ERROR) << "BinDecl::Exception: { "
+			"\"What\": \"" << e.what() << "\" }";
 		return false;
 	}
 
-/* /bin/ declarations */
-	const auto day_count = std::stoi (config_.day_count);
-	for (auto it = config_.bins.begin(); it != config_.bins.end(); ++it)
-	{
-		bin_decl_t bin;
-		if (!ParseBinDecl (*it, TZ_, day_count, &bin)) {
-			LOG(ERROR) << "Cannot parse bin delcs.";
+	try {
+/* "Symbol map" a.k.a. list of Reuters Instrument Codes (RICs). */
+		if (!ReadSymbolMap (config_.symbolmap, &symbolmap)) {
+			LOG(ERROR) << "Cannot read symbolmap file: " << config_.symbolmap;
 			return false;
 		}
-		bins_.insert (bin);
-	}
-
-/* "Symbol map" a.k.a. list of Reuters Instrument Codes (RICs). */
-	if (!ReadSymbolMap (config_.symbolmap, &symbolmap)) {
-		LOG(ERROR) << "Cannot read symbolmap file: " << config_.symbolmap;
+	} catch (std::exception& e) {
+		LOG(ERROR) << "SymbolMap::Exception: { "
+			"\"What\": \"" << e.what() << "\" }";
 		return false;
 	}
 
@@ -268,7 +286,7 @@ gomi::gomi_t::init()
 	try {
 /* RFA context. */
 		rfa_.reset (new rfa_t (config_));
-		if (!(bool)rfa_ || !rfa_->init())
+		if (!(bool)rfa_ || !rfa_->Init())
 			return false;
 
 /* RFA asynchronous event queue. */
@@ -285,7 +303,7 @@ gomi::gomi_t::init()
 
 /* RFA provider. */
 		provider_.reset (new provider_t (config_, rfa_, event_queue_));
-		if (!(bool)provider_ || !provider_->init())
+		if (!(bool)provider_ || !provider_->Init())
 			return false;
 
 /* Create state for published instruments: For every instrument, e.g. MSFT.O
@@ -304,7 +322,7 @@ gomi::gomi_t::init()
 			ss << symbol << config_.suffix;
 			auto stream = std::make_shared<realtime_stream_t> (symbol);
 			assert ((bool)stream);
-			if (!provider_->createItemStream (ss.str().c_str(), stream))
+			if (!provider_->CreateItemStream (ss.str().c_str(), stream))
 				return false;
 			stream_vector_.push_back (stream);
 
@@ -335,12 +353,12 @@ gomi::gomi_t::init()
 				ss << bin->GetSymbolName() << '.' << it->bin_name	<< config_.suffix;
 				auto stream = std::make_shared<archive_stream_t> (bin);
 				assert ((bool)stream);
-				if (!provider_->createItemStream (ss.str().c_str(), stream))
+				if (!provider_->CreateItemStream (ss.str().c_str(), stream))
 					return false;
 				v.second.push_back (stream);
 
 /* add reference to this archive to realtime stream */
-				if (is_special_bin (*it)) {
+				if (IsSpecialBin (*it)) {
 					const auto& realtime_fids = config_.realtime_fids[it->bin_name];
 					(*jt)->special.emplace_back (std::make_pair (realtime_fids, stream));
 				} else {
@@ -375,61 +393,88 @@ gomi::gomi_t::init()
 			", \"ParameterValue\": \"" << e.getParameterValue() << "\""
 			" }";
 		return false;
+	} catch (std::exception& e) {
+		LOG(ERROR) << "Rfa::Exception: { "
+			"\"What\": \"" << e.what() << "\" }";
+		return false;
 	}
 
+	try {
 /* No main loop inside this thread, must spawn new thread for message pump. */
-	event_pump_.reset (new event_pump_t (event_queue_));
-	if (!(bool)event_pump_)
-		return false;
-
-	event_thread_.reset (new boost::thread (*event_pump_.get()));
-	if (!(bool)event_thread_)
-		return false;
-
-/* Spawn SNMP implant. */
-	if (config_.is_snmp_enabled) {
-		snmp_agent_.reset (new snmp_agent_t (*this));
-		if (!(bool)snmp_agent_)
+		event_pump_.reset (new event_pump_t (event_queue_));
+		if (!(bool)event_pump_)
 			return false;
+
+		event_thread_.reset (new boost::thread ([this](){ event_pump_->Run(); }));
+		if (!(bool)event_thread_)
+			return false;
+	} catch (std::exception& e) {
+		LOG(ERROR) << "EventPump::Exception: { "
+			"\"What\": \"" << e.what() << "\" }";
+		return false;
 	}
 
-/* Register Tcl commands with TREP-VA search engine and await callbacks. */
-	if (!register_tcl_api (getId()))
+	try {
+/* Spawn SNMP implant. */
+		if (config_.is_snmp_enabled) {
+			snmp_agent_.reset (new snmp_agent_t (*this));
+			if (!(bool)snmp_agent_)
+				return false;
+		}
+	} catch (std::exception& e) {
+		LOG(ERROR) << "SnmpAgent::Exception: { "
+			"\"What\": \"" << e.what() << "\" }";
 		return false;
+	}
 
+	try {
+/* Register Tcl commands with TREP-VA search engine and await callbacks. */
+		if (!RegisterTclApi (getId()))
+		return false;
+	} catch (std::exception& e) {
+		LOG(ERROR) << "TclApi::Exception: { "
+			"\"What\": \"" << e.what() << "\" }";
+		return false;
+	}
+
+	try {
 /* Timer for periodic publishing.
  */
-	using namespace boost;
-	posix_time::ptime due_time;
-	if (!get_due_time (TZ_, &due_time)) {
-		LOG(ERROR) << "Cannot calculate timer due time.";
-		return false;
-	}
+		boost::posix_time::ptime due_time;
+		if (!GetDueTime (TZ_, &due_time)) {
+			LOG(ERROR) << "Cannot calculate timer due time.";
+			return false;
+		}
 /* convert Boost Posix Time into a Chrono time point */
-	const auto time = to_unix_epoch<std::time_t> (due_time);
-	const auto tp = chrono::system_clock::from_time_t (time);
+		const auto time = to_unix_epoch<std::time_t> (due_time);
+		const auto tp = boost::chrono::system_clock::from_time_t (time);
 
-	const chrono::seconds td (std::stoul (config_.interval));
-	timer_.reset (new time_pump_t<chrono::system_clock> (tp, td, this));
-	if (!(bool)timer_) {
-		LOG(ERROR) << "Cannot create time pump.";
+		const boost::chrono::seconds td (std::stoul (config_.interval));
+		timer_.reset (new time_pump_t<boost::chrono::system_clock> (tp, td, this));
+		if (!(bool)timer_) {
+			LOG(ERROR) << "Cannot create time pump.";
+			return false;
+		}
+		timer_thread_.reset (new boost::thread ([this](){ timer_->Run(); }));
+		if (!(bool)timer_thread_) {
+			LOG(ERROR) << "Cannot spawn timer thread.";
+			return false;
+		}
+
+		LOG(INFO) << "Added periodic timer, interval " << td.count() << " seconds"
+			<< ", due time " << boost::posix_time::to_simple_string (due_time);
+	} catch (std::exception& e) {
+		LOG(ERROR) << "TimerPump::Exception: { "
+			"\"What\": \"" << e.what() << "\" }";
 		return false;
 	}
-	timer_thread_.reset (new thread (*timer_.get()));
-	if (!(bool)timer_thread_) {
-		LOG(ERROR) << "Cannot spawn timer thread.";
-		return false;
-	}
-
-	LOG(INFO) << "Added periodic timer, interval " << td.count() << " seconds"
-		<< ", due time " << posix_time::to_simple_string (due_time);
 
 	LOG(INFO) << "Init complete, awaiting queries.";
 	return true;
 }
 
 void
-gomi::gomi_t::clear()
+gomi::gomi_t::Clear()
 {
 /* Stop generating new events. */
 	if (timer_thread_) {
@@ -470,8 +515,8 @@ void
 gomi::gomi_t::destroy()
 {
 	LOG(INFO) << "Closing instance.";
-	unregister_tcl_api (getId());
-	clear();
+	UnregisterTclApi (getId());
+	Clear();
 	LOG(INFO) << "Runtime summary: {"
 		    " \"tclQueryReceived\": " << cumulative_stats_[GOMI_PC_TCL_QUERY_RECEIVED] <<
 		   ", \"timerQueryReceived\": " << cumulative_stats_[GOMI_PC_TIMER_QUERY_RECEIVED] <<
@@ -483,7 +528,7 @@ gomi::gomi_t::destroy()
 /* callback from periodic timer.
  */
 bool
-gomi::gomi_t::processTimer (
+gomi::gomi_t::OnTimer (
 	const boost::chrono::time_point<boost::chrono::system_clock>& t
 	)
 {
@@ -510,21 +555,26 @@ gomi::gomi_t::processTimer (
 	}
 
 	try {
-		timeRefresh();
+		TimeRefresh();
 	} catch (rfa::common::InvalidUsageException& e) {
 		LOG(ERROR) << "InvalidUsageException: { "
 			  "\"Severity\": \"" << severity_string (e.getSeverity()) << "\""
 			", \"Classification\": \"" << classification_string (e.getClassification()) << "\""
 			", \"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			" }";
+	} catch (std::exception& e) {
+		LOG(ERROR) << "TimeRefresh::Exception: { "
+			"\"What\": \"" << e.what() << "\" }";
+		return false;
 	}
 	return true;
 }
 
-/* Calculate next ideal due time
+/* Calculate next ideal due time.
+ * /or the next rounded minute/
  */
 bool
-gomi::gomi_t::get_due_time (
+gomi::gomi_t::GetDueTime (
 	const boost::local_time::time_zone_ptr& tz,
 	boost::posix_time::ptime* t
 	)
@@ -533,54 +583,18 @@ gomi::gomi_t::get_due_time (
 		return false;
 
 	using namespace boost::posix_time;
-	using namespace boost::local_time;
+	const auto now_utc     = second_clock::universal_time();
+	const auto next_minute = now_utc + minutes (1);
 
-/* calculate timezone reference time-of-day */
-	const auto now_utc = second_clock::universal_time();
-	local_date_time now_tz (now_utc, tz);
-	const auto td = now_tz.local_time().time_of_day();
-
-/* search key */
-	bin_decl_t bin_decl;
-	bin_decl.bin_end = td;
-
-	auto it = bins_.upper_bound (bin_decl);	/* > td (upper-bound) not >= td (lower-bound) */
-	if (bins_.end() == it) {
-		LOG(INFO) << "Next bin is due tomorrow.";
-		it = bins_.begin();	/* wrap around */
-		now_tz += hours (24);
-	}
-
-/* bin has not yet opened */
-	if (it->bin_start > td) {
-		LOG(INFO) << "Next bin has not yet opened.";
-		return get_next_bin_close (tz, t);
-	}
-
-/* calculate next rounded minute */
-	const auto next_minute = hours (td.hours()) + minutes (1 + td.minutes());
-
-	LOG(INFO) << "next minute: " << to_simple_string (next_minute);
-
-/* less than one minute till bin close */
-	if (next_minute > it->bin_end) {
-		LOG(INFO) << "bin close: " << to_simple_string (it->bin_end);
-		LOG(INFO) << "Next bin is scheduled to close within one minute.";
-		return get_next_bin_close (tz, t);
-	}
-
-/* convert time-of-day into Microsoft FILETIME */
-	const local_date_time minute_ldt (now_tz.local_time().date(), next_minute, tz, local_date_time::NOT_DATE_TIME_ON_ERROR);
-	DCHECK (!minute_ldt.is_not_a_date_time());
-
-	*t = minute_ldt.utc_time();
+	*t = ptime (next_minute.date(),
+		    time_duration (next_minute.time_of_day().hours(), next_minute.time_of_day().minutes(), 0, 0));
 	return true;
 }
 
 /* Calculate the next bin close timestamp for the requested timezone.
  */
 bool
-gomi::gomi_t::get_next_bin_close (
+gomi::gomi_t::GetNextBinClose (
 	const boost::local_time::time_zone_ptr& tz,
 	boost::posix_time::ptime* t
 	)
@@ -617,7 +631,7 @@ gomi::gomi_t::get_next_bin_close (
 /* Calculate the time-of-day of the last bin close.
  */
 bool
-gomi::gomi_t::get_last_bin_close (
+gomi::gomi_t::GetLastBinClose (
 	const boost::local_time::time_zone_ptr& tz,
 	boost::posix_time::time_duration* last_close
 	)
@@ -648,17 +662,18 @@ gomi::gomi_t::get_last_bin_close (
 /* Refresh based upon time-of-day.  Archive & realtime bins.
  */
 bool
-gomi::gomi_t::timeRefresh()
+gomi::gomi_t::TimeRefresh()
 {
 	using namespace boost::posix_time;
 	const ptime t0 (microsec_clock::universal_time());
 	last_activity_ = t0;
 
-	LOG(INFO) << "timeRefresh";
+	LOG(INFO) << "TimeRefresh";
 
 /* Calculate affected bins */
 	bin_decl_t bin_decl;
-	if (!get_last_bin_close (TZ_, &bin_decl.bin_end)) {
+	bin_decl.bin_tz = TZ_;
+	if (!GetLastBinClose (TZ_, &bin_decl.bin_end)) {
 		LOG(ERROR) << "Cannot calculate last bin close time of day.";
 		return false;
 	}
@@ -681,21 +696,24 @@ gomi::gomi_t::timeRefresh()
 		it != bins_.end() && it->bin_end == bin_decl.bin_end;
 		++it)
 	{
-		binRefresh (*it);
+		BinRefresh (*it);
 		++bin_refresh_count;
 	}
 
 	if (0 == bin_refresh_count) {
-		auto it = bins_.find (bin_decl);
+		auto it = bins_.find (bin_decl), jt = it;
 		do {
 			if (++it == bins_.end())
 				it = bins_.begin();
 		} while (it->bin_end == bin_decl.bin_end);
-		LOG(INFO) << "No bins to re-calculate, previous bin: " << bin_decl << ", next bin: " << *it;
+		if (jt == bins_.end())
+			LOG(INFO) << "No bins to re-calculate, first bin: " << *it;
+		else
+			LOG(INFO) << "No bins to re-calculate, previous bin: " << *jt << ", next bin: " << *it;
 		return false;
 	}
 
-	summaryRefresh();
+	SummaryRefresh();
 
 /* save this iteration time */
 	last_refresh_ = bin_decl.bin_end;
@@ -713,14 +731,14 @@ gomi::gomi_t::timeRefresh()
 /* Refresh todays analytic content.
  */
 bool
-gomi::gomi_t::dayRefresh()
+gomi::gomi_t::DayRefresh()
 {
 	using namespace boost::posix_time;
 	using namespace boost::local_time;
 	const ptime t0 (microsec_clock::universal_time());
 	last_activity_ = t0;
 
-	LOG(INFO) << "dayRefresh";
+	LOG(INFO) << "DayRefresh";
 
 /* Calculate affected bins */
 	const auto now_utc = second_clock::universal_time();
@@ -733,13 +751,13 @@ gomi::gomi_t::dayRefresh()
 			(*jt)->Clear();
 
 	for (auto it = bins_.begin(); it != bins_.end() && it->bin_end <= now_td; ++it) {
-		binRefresh (*it);
+		BinRefresh (*it);
 
 /* save this iteration time to prevent replay */
 		last_refresh_ = it->bin_end;
 	}
 
-	summaryRefresh();
+	SummaryRefresh();
 
 /* Timing */
 	const ptime t1 (microsec_clock::universal_time());
@@ -774,7 +792,7 @@ gomi::gomi_t::Recalculate()
 			(*jt)->Clear();
 
 	std::for_each (bins_.begin(), bins_.end(), [this](const bin_decl_t& bin_decl) {
-		binRefresh (bin_decl);
+		BinRefresh (bin_decl);
 	});
 
 /* clear iteration time */
@@ -791,7 +809,7 @@ gomi::gomi_t::Recalculate()
 }
 
 bool
-gomi::gomi_t::binRefresh (
+gomi::gomi_t::BinRefresh (
 	const gomi::bin_decl_t& ref_bin
 	)
 {
@@ -800,7 +818,7 @@ gomi::gomi_t::binRefresh (
 	bin_decl.bin_tz = TZ_;
 	bin_decl.bin_day_count = std::stoi (config_.day_count);
 
-	LOG(INFO) << "binRefresh (bin: " << bin_decl << ")";
+	LOG(INFO) << "BinRefresh (bin: " << bin_decl << ")";
 
 /* refreshes last /x/ business days, i.e. executing on a holiday will only refresh the cache contents */
 	auto& v = query_vector_[bin_decl];
@@ -852,7 +870,7 @@ gomi::gomi_t::binRefresh (
 
 /* 4.3.1 RespMsg.Payload */
 // not std::map :(  derived from rfa::common::Data
-	fields_.setAssociatedMetaInfo (provider_->getRwfMajorVersion(), provider_->getRwfMinorVersion());
+	fields_.setAssociatedMetaInfo (provider_->GetRwfMajorVersion(), provider_->GetRwfMinorVersion());
 	fields_.setInfo (kDictionaryId, kFieldListId);
 
 /* TIMEACT & ACTIV_DATE */
@@ -968,7 +986,7 @@ gomi::gomi_t::binRefresh (
 			assert (rfa::message::MsgValidationOk == validation_status);
 		}
 #endif
-		provider_->send (*stream.get(), static_cast<rfa::common::Msg&> (response));
+		provider_->Send (stream.get(), &response);
 	});
 	return true;
 }
@@ -977,7 +995,7 @@ gomi::gomi_t::binRefresh (
  * a special last 10-minute bin derived from the current time-of-day.
  */
 bool
-gomi::gomi_t::summaryRefresh ()
+gomi::gomi_t::SummaryRefresh ()
 {
 	using namespace boost::posix_time;
 	using namespace boost::local_time;
@@ -993,7 +1011,7 @@ gomi::gomi_t::summaryRefresh ()
 		if (!(bool)*(*jt))
 			break;
 		close_time = (*jt)->GetCloseTime();
-		if (!is_special_bin (it->first)) {
+		if (!IsSpecialBin (it->first)) {
 			has_last_10min_bin = true;
 			last_10min_bin = it->first;
 		}
@@ -1039,7 +1057,7 @@ gomi::gomi_t::summaryRefresh ()
 
 /* 4.3.1 RespMsg.Payload */
 // not std::map :(  derived from rfa::common::Data
-	fields_.setAssociatedMetaInfo (provider_->getRwfMajorVersion(), provider_->getRwfMinorVersion());
+	fields_.setAssociatedMetaInfo (provider_->GetRwfMajorVersion(), provider_->GetRwfMinorVersion());
 	fields_.setInfo (kDictionaryId, kFieldListId);
 
 /* TIMEACT */
@@ -1160,7 +1178,7 @@ gomi::gomi_t::summaryRefresh ()
 			assert (rfa::message::MsgValidationOk == validation_status);
 		}
 #endif
-		provider_->send (*stream.get(), static_cast<rfa::common::Msg&> (response));
+		provider_->Send (stream.get(), &response);
 	});
 	return true;
 }

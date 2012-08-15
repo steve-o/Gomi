@@ -43,7 +43,7 @@ static const char* kTclApi[] = {
 /* Register Tcl API.
  */
 bool
-gomi::gomi_t::register_tcl_api (const char* id)
+gomi::gomi_t::RegisterTclApi (const char* id)
 {
 	for (size_t i = 0; i < _countof (kTclApi); ++i) {
 		registerCommand (id, kTclApi[i]);
@@ -55,7 +55,7 @@ gomi::gomi_t::register_tcl_api (const char* id)
 /* Unregister Tcl API.
  */
 bool
-gomi::gomi_t::unregister_tcl_api (const char* id)
+gomi::gomi_t::UnregisterTclApi (const char* id)
 {
 	for (size_t i = 0; i < _countof (kTclApi); ++i) {
 		deregisterCommand (id, kTclApi[i]);
@@ -109,22 +109,24 @@ gomi::gomi_t::execute (
 	try {
 		const char* command = cmdInfo.getCommandName();
 		if (0 == strcmp (command, kBasicFunctionName))
-			retval = tclGomiQuery (cmdInfo, cmdData);
+			retval = TclGomiQuery (cmdInfo, cmdData);
 		else if (0 == strcmp (command, kFeedLogFunctionName))
-			retval = tclFeedLogQuery (cmdInfo, cmdData);
+			retval = TclFeedLogQuery (cmdInfo, cmdData);
 		else if (0 == strcmp (command, kRepublishFunctionName))
-			retval = tclRepublishQuery (cmdInfo, cmdData);
+			retval = TclRepublishQuery (cmdInfo, cmdData);
 		else if (0 == strcmp (command, kRepublishLastBinFunctionName))
-			retval = tclRepublishLastBinQuery (cmdInfo, cmdData);
+			retval = TclRepublishLastBinQuery (cmdInfo, cmdData);
 		else if (0 == strcmp (command, kRecalculateFunctionName))
-			retval = tclRecalculateQuery (cmdInfo, cmdData);
+			retval = TclRecalculateQuery (cmdInfo, cmdData);
 		else
 			Tcl_SetResult (interp, "unknown function", TCL_STATIC);
 	}
 /* FlexRecord exceptions */
 	catch (const vpf::PluginFrameworkException& e) {
 		/* yay broken Tcl API */
-		Tcl_SetResult (interp, (char*)e.what(), TCL_VOLATILE);
+		Tcl_SetResult (interp, const_cast<char*> (e.what()), TCL_VOLATILE);
+	} catch (std::exception& e) {
+		Tcl_SetResult (interp, const_cast<char*> (e.what()), TCL_VOLATILE);
 	}
 	catch (...) {
 		Tcl_SetResult (interp, "Unhandled exception", TCL_STATIC);
@@ -149,7 +151,7 @@ gomi::gomi_t::execute (
  *	gomi_query ”America/New_York” [TIBX.O, NKE.N] 10 "09:00" "09:30"
  */
 int
-gomi::gomi_t::tclGomiQuery (
+gomi::gomi_t::TclGomiQuery (
 	const vpf::CommandInfo& cmdInfo,
 	vpf::TCLCommandData& cmdData
 	)
@@ -335,7 +337,7 @@ uint64_t flexrecord_t::sequence_ = 0;
  * variant of gomi_query that outputs to a feedlog formatted file.
  */
 int
-gomi::gomi_t::tclFeedLogQuery (
+gomi::gomi_t::TclFeedLogQuery (
 	const vpf::CommandInfo& cmdInfo,
 	vpf::TCLCommandData& cmdData
 	)
@@ -500,7 +502,7 @@ gomi::gomi_t::tclFeedLogQuery (
  * Republish all todays analytic results.
  */
 int
-gomi::gomi_t::tclRepublishQuery (
+gomi::gomi_t::TclRepublishQuery (
 	const vpf::CommandInfo& cmdInfo,
 	vpf::TCLCommandData& cmdData
 	)
@@ -517,7 +519,7 @@ gomi::gomi_t::tclRepublishQuery (
 	}
 
 	try {
-		dayRefresh();
+		DayRefresh();
 	} catch (rfa::common::InvalidUsageException& e) {
 		LOG(ERROR) << "InvalidUsageException: { "
 			"Severity: \"" << severity_string (e.getSeverity()) << "\""
@@ -532,7 +534,7 @@ gomi::gomi_t::tclRepublishQuery (
  * Recalculate and publish only the last set of bin analytic results.
  */
 int
-gomi::gomi_t::tclRepublishLastBinQuery (
+gomi::gomi_t::TclRepublishLastBinQuery (
 	const vpf::CommandInfo& cmdInfo,
 	vpf::TCLCommandData& cmdData
 	)
@@ -550,7 +552,7 @@ gomi::gomi_t::tclRepublishLastBinQuery (
 
 	try {
 		last_refresh_ = boost::posix_time::not_a_date_time;
-		timeRefresh();
+		TimeRefresh();
 	} catch (rfa::common::InvalidUsageException& e) {
 		LOG(ERROR) << "InvalidUsageException: { "
 			"Severity: \"" << severity_string (e.getSeverity()) << "\""
@@ -565,7 +567,7 @@ gomi::gomi_t::tclRepublishLastBinQuery (
  * Calculate and not publish a full 24-hour window of analytics.
  */
 int
-gomi::gomi_t::tclRecalculateQuery (
+gomi::gomi_t::TclRecalculateQuery (
 	const vpf::CommandInfo& cmdInfo,
 	vpf::TCLCommandData& cmdData
 	)

@@ -104,7 +104,7 @@ gomi::rfa_t::~rfa_t()
 }
 
 bool
-gomi::rfa_t::init()
+gomi::rfa_t::Init()
 {
 	VLOG(2) << "Initializing RFA.";
 	rfa::common::Context::initialize();

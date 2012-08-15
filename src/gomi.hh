@@ -110,7 +110,7 @@ namespace gomi
 		{
 		}
 
-		void operator()()
+		void Run (void)
 		{
 			while (event_queue_->isActive()) {
 				event_queue_->dispatch (rfa::common::Dispatchable::InfiniteWait);
@@ -126,7 +126,7 @@ namespace gomi
 	class time_base_t
 	{
 	public:
-		virtual bool processTimer (const boost::chrono::time_point<Clock, Duration>& t) = 0;
+		virtual bool OnTimer (const boost::chrono::time_point<Clock, Duration>& t) = 0;
 	};
 
 	template<class Clock, class Duration = typename Clock::duration>
@@ -141,12 +141,12 @@ namespace gomi
 			CHECK(nullptr != cb_);
 		}
 
-		void operator()()
+		void Run (void)
 		{
 			try {
 				while (true) {
 					boost::this_thread::sleep_until (due_time_);
-					if (!cb_->processTimer (due_time_))
+					if (!cb_->OnTimer (due_time_))
 						break;
 					due_time_ += td_;
 				}
@@ -175,10 +175,10 @@ namespace gomi
 		virtual void init (const vpf::UserPluginConfig& config_) override;
 
 /* Core initialization. */
-		bool init();
+		bool Init();
 
 /* Reset state suitable for recalling init(). */
-		void clear();
+		void Clear();
 
 /* Plugin termination point. */
 		virtual void destroy() override;
@@ -187,7 +187,7 @@ namespace gomi
 		virtual int execute (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData) override;
 
 /* Configured period timer entry point. */
-		bool processTimer (const boost::chrono::time_point<boost::chrono::system_clock>& t) override;
+		bool OnTimer (const boost::chrono::time_point<boost::chrono::system_clock>& t) override;
 
 /* Global list of all plugin instances.  AE owns pointer. */
 		static std::list<gomi_t*> global_list_;
@@ -196,28 +196,28 @@ namespace gomi
 	private:
 
 /* Run core event loop. */
-		void mainLoop();
+		void MainLoop();
 
-		bool register_tcl_api (const char* id);
-		bool unregister_tcl_api (const char* id);
-		int tclGomiQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
-		int tclFeedLogQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
-		int tclRepublishQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
-		int tclRepublishLastBinQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
-		int tclRecalculateQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
+		bool RegisterTclApi (const char* id);
+		bool UnregisterTclApi (const char* id);
+		int TclGomiQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
+		int TclFeedLogQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
+		int TclRepublishQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
+		int TclRepublishLastBinQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
+		int TclRecalculateQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 
-		bool is_special_bin (const bin_decl_t& bin);
+		bool IsSpecialBin (const bin_decl_t& bin);
 
-		bool get_due_time (const boost::local_time::time_zone_ptr& tz, boost::posix_time::ptime* t);
-		bool get_next_bin_close (const boost::local_time::time_zone_ptr& tz, boost::posix_time::ptime* t);
-		bool get_last_bin_close (const boost::local_time::time_zone_ptr& tz, boost::posix_time::time_duration* last_close);
+		bool GetDueTime (const boost::local_time::time_zone_ptr& tz, boost::posix_time::ptime* t);
+		bool GetNextBinClose (const boost::local_time::time_zone_ptr& tz, boost::posix_time::ptime* t);
+		bool GetLastBinClose (const boost::local_time::time_zone_ptr& tz, boost::posix_time::time_duration* last_close);
 
 /* Broadcast out messages. */
-		bool timeRefresh() throw (rfa::common::InvalidUsageException);
-		bool dayRefresh() throw (rfa::common::InvalidUsageException);
+		bool TimeRefresh() throw (rfa::common::InvalidUsageException);
+		bool DayRefresh() throw (rfa::common::InvalidUsageException);
 		bool Recalculate() throw (rfa::common::InvalidUsageException);
-		bool binRefresh (const bin_decl_t& bin) throw (rfa::common::InvalidUsageException);
-		bool summaryRefresh() throw (rfa::common::InvalidUsageException);
+		bool BinRefresh (const bin_decl_t& bin) throw (rfa::common::InvalidUsageException);
+		bool SummaryRefresh() throw (rfa::common::InvalidUsageException);
 
 /* Unique instance number per process. */
 		LONG instance_;
