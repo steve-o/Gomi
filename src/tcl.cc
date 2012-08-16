@@ -99,7 +99,7 @@ gomi::gomi_t::execute (
 	)
 {
 	int retval = TCL_ERROR;
-	TCLLibPtrs* tclStubsPtr = (TCLLibPtrs*)cmdData.mClientData;
+	TCLLibPtrs* tclStubsPtr = reinterpret_cast<TCLLibPtrs*> (cmdData.mClientData);
 	Tcl_Interp* interp = cmdData.mInterp;		/* Current interpreter. */
 	const boost::posix_time::ptime t0 (boost::posix_time::microsec_clock::universal_time());
 	last_activity_ = t0;
@@ -127,8 +127,7 @@ gomi::gomi_t::execute (
 		Tcl_SetResult (interp, const_cast<char*> (e.what()), TCL_VOLATILE);
 	} catch (std::exception& e) {
 		Tcl_SetResult (interp, const_cast<char*> (e.what()), TCL_VOLATILE);
-	}
-	catch (...) {
+	} catch (...) {
 		Tcl_SetResult (interp, "Unhandled exception", TCL_STATIC);
 	}
 
@@ -156,7 +155,7 @@ gomi::gomi_t::TclGomiQuery (
 	vpf::TCLCommandData& cmdData
 	)
 {
-	TCLLibPtrs* tclStubsPtr = (TCLLibPtrs*)cmdData.mClientData;
+	TCLLibPtrs* tclStubsPtr = reinterpret_cast<TCLLibPtrs*> (cmdData.mClientData);
 	Tcl_Interp* interp = cmdData.mInterp;		/* Current interpreter. */
 	int objc = cmdData.mObjc;			/* Number of arguments. */
 	Tcl_Obj** CONST objv = cmdData.mObjv;		/* Argument strings. */
@@ -342,7 +341,7 @@ gomi::gomi_t::TclFeedLogQuery (
 	vpf::TCLCommandData& cmdData
 	)
 {
-	TCLLibPtrs* tclStubsPtr = (TCLLibPtrs*)cmdData.mClientData;
+	TCLLibPtrs* tclStubsPtr = reinterpret_cast<TCLLibPtrs*> (cmdData.mClientData);
 	Tcl_Interp* interp = cmdData.mInterp;		/* Current interpreter. */
 	int objc = cmdData.mObjc;			/* Number of arguments. */
 	Tcl_Obj** CONST objv = cmdData.mObjv;		/* Argument strings. */
@@ -507,7 +506,7 @@ gomi::gomi_t::TclRepublishQuery (
 	vpf::TCLCommandData& cmdData
 	)
 {
-	TCLLibPtrs* tclStubsPtr = (TCLLibPtrs*)cmdData.mClientData;
+	TCLLibPtrs* tclStubsPtr = reinterpret_cast<TCLLibPtrs*> (cmdData.mClientData);
 	Tcl_Interp* interp = cmdData.mInterp;		/* Current interpreter. */
 /* Refresh already running.  Note locking is handled outside query to enable
  * feedback to Tcl interface.
@@ -539,7 +538,7 @@ gomi::gomi_t::TclRepublishLastBinQuery (
 	vpf::TCLCommandData& cmdData
 	)
 {
-	TCLLibPtrs* tclStubsPtr = (TCLLibPtrs*)cmdData.mClientData;
+	TCLLibPtrs* tclStubsPtr = reinterpret_cast<TCLLibPtrs*> (cmdData.mClientData);
 	Tcl_Interp* interp = cmdData.mInterp;		/* Current interpreter. */
 /* Refresh already running.  Note locking is handled outside query to enable
  * feedback to Tcl interface.
@@ -572,7 +571,7 @@ gomi::gomi_t::TclRecalculateQuery (
 	vpf::TCLCommandData& cmdData
 	)
 {
-	TCLLibPtrs* tclStubsPtr = (TCLLibPtrs*)cmdData.mClientData;
+	TCLLibPtrs* tclStubsPtr = reinterpret_cast<TCLLibPtrs*> (cmdData.mClientData);
 	Tcl_Interp* interp = cmdData.mInterp;		/* Current interpreter. */
 /* Refresh already running.  Note locking is handled outside query to enable
  * feedback to Tcl interface.
