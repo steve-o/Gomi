@@ -713,11 +713,11 @@ gomi::gomi_t::TimeRefresh()
 		return false;
 	}
 
-	SummaryRefresh();
-
 /* save this iteration time */
 	last_refresh_ = bin_decl.bin_end;
-	
+
+	SummaryRefresh (last_refresh_);
+
 /* Timing */
 	const ptime t1 (microsec_clock::universal_time());
 	const time_duration td = t1 - t0;
@@ -757,7 +757,7 @@ gomi::gomi_t::DayRefresh()
 		last_refresh_ = it->bin_end;
 	}
 
-	SummaryRefresh();
+	SummaryRefresh (last_refresh_);
 
 /* Timing */
 	const ptime t1 (microsec_clock::universal_time());
@@ -995,7 +995,7 @@ gomi::gomi_t::BinRefresh (
  * a special last 10-minute bin derived from the current time-of-day.
  */
 bool
-gomi::gomi_t::SummaryRefresh ()
+gomi::gomi_t::SummaryRefresh (const boost::posix_time::time_duration& time_of_day)
 {
 	using namespace boost::posix_time;
 	using namespace boost::local_time;
@@ -1004,22 +1004,67 @@ gomi::gomi_t::SummaryRefresh ()
 	bin_decl_t last_10min_bin;
 	bool has_last_10min_bin = false;
 
-/* find close time of last bin suitable for timestamp */
-/* walk entire archive data set for most recent non-null janku and capture timestamp */
-	for (auto it = query_vector_.begin(); it != query_vector_.end(); ++it) {
-		auto jt = it->second.first.begin();
-		if (!(bool)*(*jt))
-			break;
-		close_time = (*jt)->GetCloseTime();
-		if (!IsSpecialBin (it->first)) {
-			has_last_10min_bin = true;
-			last_10min_bin = it->first;
+	{
+		auto it = query_vector_.begin();
+		for (; it != query_vector_.end(); ++it)
+		{
+/* check every earlier bin for 10-minute publish */
+			if (time_of_day >= it->first.bin_end && !IsSpecialBin (it->first)) {
+				auto jt = it->second.first.begin();
+				if ((bool)*(*jt)) {
+					has_last_10min_bin = true;
+					last_10min_bin = it->first;
+				} else {
+					LOG(ERROR) << "10-min bin " << to_simple_string (it->first.bin_end) << " has not been calculated.";
+				}
+			}
+
+/* find last bin from provided time-of-day */
+			if (time_of_day == it->first.bin_end) {
+/* test for valid analytic data */
+				auto jt = it->second.first.begin();
+				if ((bool)*(*jt)) {
+/* save full time & date */
+					close_time = (*jt)->GetCloseTime();				
+				} else {
+					LOG(ERROR) << "bin " << to_simple_string (it->first.bin_end) << " has not been calculated.";
+				}
+				break;
+			} else if (time_of_day < it->first.bin_end) {
+				LOG(ERROR) << "Summary time-of-day " << to_simple_string (time_of_day) << " is before bin close time " << to_simple_string (it->first.bin_end);
+				break;
+			}
+		}
+
+/* no prior analytics found */
+		if (close_time.is_not_a_date_time())
+			return false;
+
+/* find empty 10-min bin to use */
+		if (!has_last_10min_bin) {
+			for (auto jt = it; jt != query_vector_.end(); ++jt) {
+				if (!IsSpecialBin (jt->first)) {
+					has_last_10min_bin = true;
+					last_10min_bin = jt->first;
+					break;
+				}
+			}
+
+			if (!has_last_10min_bin) {
+				LOG(ERROR) << "Cannot find any 10-min bin.";
+			}
+		}
+
+/* clear out post-bins */
+		for (; it != query_vector_.end(); ++it) {
+			if (time_of_day == it->first.bin_end)
+				continue;
+
+			for (auto jt = it->second.first.begin(); jt != it->second.first.end(); ++jt)
+				if ((bool)*(*jt))
+					(*jt)->Clear();
 		}
 	}
-
-/* no analytics found */
-	if (close_time.is_not_a_date_time())
-		return false;
 
 	LOG(INFO) << "Summary timestamp: " << to_simple_string (close_time);
 

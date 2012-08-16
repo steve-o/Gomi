@@ -217,7 +217,7 @@ namespace gomi
 		bool DayRefresh() throw (rfa::common::InvalidUsageException);
 		bool Recalculate() throw (rfa::common::InvalidUsageException);
 		bool BinRefresh (const bin_decl_t& bin) throw (rfa::common::InvalidUsageException);
-		bool SummaryRefresh() throw (rfa::common::InvalidUsageException);
+		bool SummaryRefresh (const boost::posix_time::time_duration& time_of_day) throw (rfa::common::InvalidUsageException);
 
 /* Unique instance number per process. */
 		LONG instance_;

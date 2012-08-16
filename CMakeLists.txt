@@ -8,7 +8,7 @@ project (Gomi)
 
 set(GOMI_VERSION_MAJOR 1)
 set(GOMI_VERSION_MINOR 6)
-set(GOMI_VERSION_BUILD 12)
+set(GOMI_VERSION_BUILD 14)
 
 # Net-SNMP SDK installed, tested 5.7.1.
 set(NETSNMP_ROOT D:/net-snmp-5.7.1)
