@@ -60,7 +60,7 @@ namespace gomi
 	class request_t : boost::noncopyable
 	{
 	public:
-		request_t (std::shared_ptr<item_stream_t>& item_stream_, std::shared_ptr<client_t>& client_, bool is_streaming_, bool use_attribinfo_in_updates_)
+		request_t (std::shared_ptr<item_stream_t> item_stream_, std::shared_ptr<client_t> client_, bool is_streaming_, bool use_attribinfo_in_updates_)
 			: item_stream (item_stream_),
 			  client (client_),
 			  is_streaming (is_streaming_),
@@ -95,6 +95,7 @@ namespace gomi
 	};
 
 	class provider_t :
+		public std::enable_shared_from_this<provider_t>,
 		public rfa::common::Client,
 		boost::noncopyable
 	{
@@ -103,10 +104,11 @@ namespace gomi
 		~provider_t();
 
 		bool Init() throw (rfa::common::InvalidConfigurationException, rfa::common::InvalidUsageException);
+		void Clear();
 
 		bool CreateItemStream (const char* name, std::shared_ptr<item_stream_t> item_stream) throw (rfa::common::InvalidUsageException);
-		bool Send (item_stream_t& item_stream, rfa::message::RespMsg& msg, const rfa::message::AttribInfo& attribInfo) throw (rfa::common::InvalidUsageException);
-		bool SendReply (rfa::message::RespMsg& msg, rfa::sessionLayer::RequestToken& token) throw (rfa::common::InvalidUsageException);
+		bool SendReply (rfa::message::RespMsg*const msg, rfa::sessionLayer::RequestToken*const token) throw (rfa::common::InvalidUsageException);
+		uint32_t Submit (rfa::message::RespMsg*const msg, rfa::sessionLayer::RequestToken*const token, void* closure) throw (rfa::common::InvalidUsageException);
 
 /* RFA event callback. */
 		void processEvent (const rfa::common::Event& event) override;
@@ -137,8 +139,6 @@ namespace gomi
 		void GetServiceCapabilities (rfa::data::SingleWriteIterator* it);
 		void GetServiceDictionaries (rfa::data::SingleWriteIterator* it);
 		void GetServiceState (rfa::data::SingleWriteIterator* it, uint8_t rwf_major_version, uint8_t rwf_minor_version);
-
-		uint32_t Submit (rfa::common::Msg& msg, rfa::sessionLayer::RequestToken& token, void* closure) throw (rfa::common::InvalidUsageException);
 
 		void SetServiceId (uint32_t service_id) {
 			service_id_.store (service_id);
@@ -207,7 +207,7 @@ namespace gomi
 
 /* RFA request thread client. */
 		std::shared_ptr<void> zmq_context_;
-		std::shared_ptr<void> sender_;
+		std::shared_ptr<void> request_sock_;
 
 /** Performance Counters **/
 		boost::posix_time::ptime creation_time_, last_activity_;

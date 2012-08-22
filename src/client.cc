@@ -21,7 +21,7 @@
 using rfa::common::RFA_String;
 
 gomi::client_t::client_t (
-	gomi::provider_t& provider,
+	std::shared_ptr<gomi::provider_t> provider,
 	const rfa::common::Handle* handle
 	) :
 	creation_time_ (boost::posix_time::second_clock::universal_time()),
@@ -44,6 +44,7 @@ gomi::client_t::client_t (
 
 gomi::client_t::~client_t()
 {
+	Clear();
 	using namespace boost::posix_time;
 	const auto uptime = second_clock::universal_time() - creation_time_;
 	VLOG(3) << prefix_ << "Summary: {"
@@ -51,6 +52,7 @@ gomi::client_t::~client_t()
 		", \"RfaEventsReceived\": " << cumulative_stats_[CLIENT_PC_RFA_EVENTS_RECEIVED] <<
 		", \"RfaMessagesSent\": " << cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT] <<
 		" }";
+	LOG(INFO) << prefix_ << "Closed client.";
 }
 
 bool
@@ -63,6 +65,12 @@ gomi::client_t::Init (
 	return true;
 }
 
+void
+gomi::client_t::Clear (void)
+{
+	provider_.reset();
+}
+
 bool
 gomi::client_t::GetAssociatedMetaInfo()
 {
@@ -71,7 +79,7 @@ gomi::client_t::GetAssociatedMetaInfo()
 	last_activity_ = boost::posix_time::second_clock::universal_time();
 
 /* Store negotiated Reuters Wire Format version information. */
-	auto& map = provider_.map_;
+	auto& map = provider_->map_;
 	map.setAssociatedMetaInfo (*handle_);
 	rwf_major_version_ = map.getMajorVersion();
 	rwf_minor_version_ = map.getMinorVersion();
@@ -125,7 +133,7 @@ gomi::client_t::OnOMMSolicitedItemEvent (
 
 	switch (msg.getMsgType()) {
 	case rfa::message::ReqMsgEnum:
-		OnReqMsg (static_cast<const rfa::message::ReqMsg&>(msg), item_event.getRequestToken());
+		OnReqMsg (static_cast<const rfa::message::ReqMsg&>(msg), &(item_event.getRequestToken()));
 		break;
 	default:
 		cumulative_stats_[CLIENT_PC_OMM_SOLICITED_ITEM_EVENTS_DISCARDED]++;
@@ -137,7 +145,7 @@ gomi::client_t::OnOMMSolicitedItemEvent (
 void
 gomi::client_t::OnReqMsg (
 	const rfa::message::ReqMsg& request_msg,
-	rfa::sessionLayer::RequestToken& request_token
+	rfa::sessionLayer::RequestToken*const request_token
 	)
 {
 	cumulative_stats_[CLIENT_PC_REQUEST_MSGS_RECEIVED]++;
@@ -186,7 +194,7 @@ gomi::client_t::OnReqMsg (
 void
 gomi::client_t::OnLoginRequest (
 	const rfa::message::ReqMsg& login_msg,
-	rfa::sessionLayer::RequestToken& login_token
+	rfa::sessionLayer::RequestToken*const login_token
 	)
 {
 	cumulative_stats_[CLIENT_PC_MMT_LOGIN_RECEIVED]++;
@@ -199,13 +207,13 @@ gomi::client_t::OnLoginRequest (
 		cumulative_stats_[CLIENT_PC_MMT_LOGIN_VALIDATED]++;
 		if (rfa::message::MsgValidationWarning == validation_status)
 			LOG(WARNING) << prefix_ << "MMT_LOGIN::validateMsg: { \"warningText\": \"" << warningText << "\" }";
-	} catch (rfa::common::InvalidUsageException& e) {
+	} catch (const rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[CLIENT_PC_MMT_LOGIN_MALFORMED]++;
 		LOG(WARNING) << prefix_ <<
 			"MMT_LOGIN::InvalidUsageException: { " <<
 			  "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			", " << login_msg <<
-			", \"RequestToken\": " << (intptr_t)&login_token <<
+			", \"RequestToken\": " << (uintptr_t)login_token <<
 			" }";
 	}
 
@@ -247,17 +255,17 @@ gomi::client_t::OnLoginRequest (
 			AcceptLogin (login_msg, login_token);
 
 /* save token for closing the session. */
-			login_token_ = &login_token;
+			login_token_  = login_token;
 			is_logged_in_ = true;
 		}
 /* ignore any error */
-	} catch (rfa::common::InvalidUsageException& e) {
+	} catch (const rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[CLIENT_PC_MMT_LOGIN_EXCEPTION]++;
 		LOG(ERROR) << prefix_ <<
 			"MMT_LOGIN::InvalidUsageException: { "
 			   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			", " << login_msg <<
-			", \"RequestToken\": " << (intptr_t)&login_token <<
+			", \"RequestToken\": " << (uintptr_t)login_token <<
 			" }";
 	}
 }
@@ -280,13 +288,13 @@ gomi::client_t::OnLoginRequest (
 bool
 gomi::client_t::RejectLogin (
 	const rfa::message::ReqMsg& login_msg,
-	rfa::sessionLayer::RequestToken& login_token
+	rfa::sessionLayer::RequestToken*const login_token
 	)
 {
 	VLOG(2) << prefix_ << "Sending MMT_LOGIN rejection.";
 
 /* 7.5.9.1 Create a response message (4.2.2) */
-	auto& response = provider_.response_;
+	auto& response = provider_->response_;
 	response.clear();
 /* 7.5.9.2 Set the message model type of the response. */
 	response.setMsgModelType (rfa::rdm::MMT_LOGIN);
@@ -294,14 +302,14 @@ gomi::client_t::RejectLogin (
 	response.setRespType (rfa::message::RespMsg::StatusEnum);
 
 /* 7.5.9.5 Create or re-use a request attribute object (4.2.4) */
-	auto& attribInfo = provider_.attribInfo_;
+	auto& attribInfo = provider_->attribInfo_;
 	attribInfo.clear();
 /* RDM 3.2.4 AttribInfo: Name is required, NameType is recommended: default is USER_NAME (1) */
 	attribInfo.setNameType (login_msg.getAttribInfo().getNameType());
 	attribInfo.setName (login_msg.getAttribInfo().getName());
 	response.setAttribInfo (attribInfo);
 
-	auto& status = provider_.status_;
+	auto& status = provider_->status_;
 	status.clear();
 /* Item interaction state: RDM 3.2.2 RespMsg: Closed or ClosedRecover. */
 	status.setStreamState (rfa::common::RespStatus::ClosedEnum);
@@ -322,7 +330,7 @@ gomi::client_t::RejectLogin (
 		cumulative_stats_[CLIENT_PC_MMT_LOGIN_RESPONSE_VALIDATED]++;
 		if (rfa::message::MsgValidationWarning == validation_status)
 			LOG(WARNING) << prefix_ << "MMT_LOGIN::validateMsg: { \"warningText\": \"" << warningText << "\" }";
-	} catch (rfa::common::InvalidUsageException& e) {
+	} catch (const rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[CLIENT_PC_MMT_LOGIN_RESPONSE_MALFORMED]++;
 		LOG(ERROR) << prefix_ <<
 			"MMT_LOGIN::InvalidUsageException: { " <<
@@ -331,7 +339,7 @@ gomi::client_t::RejectLogin (
 			" }";
 	}
 
-	Submit (response, login_token, nullptr);
+	Submit (&response, login_token, nullptr);
 	cumulative_stats_[CLIENT_PC_MMT_LOGIN_REJECTED]++;
 	return true;
 }
@@ -348,13 +356,13 @@ gomi::client_t::RejectLogin (
 bool
 gomi::client_t::AcceptLogin (
 	const rfa::message::ReqMsg& login_msg,
-	rfa::sessionLayer::RequestToken& login_token
+	rfa::sessionLayer::RequestToken*const login_token
 	)
 {
 	VLOG(2) << prefix_ << "Sending MMT_LOGIN accepted.";
 
 /* 7.5.9.1 Create a response message (4.2.2) */
-	auto& response = provider_.response_;
+	auto& response = provider_->response_;
 	response.clear();
 /* 7.5.9.2 Set the message model type of the response. */
 	response.setMsgModelType (rfa::rdm::MMT_LOGIN);
@@ -363,16 +371,16 @@ gomi::client_t::AcceptLogin (
 	response.setIndicationMask (rfa::message::RespMsg::RefreshCompleteFlag);
 
 /* 7.5.9.5 Create or re-use a request attribute object (4.2.4) */
-	auto& attribInfo = provider_.attribInfo_;
+	auto& attribInfo = provider_->attribInfo_;
 	attribInfo.clear();
 /* RDM 3.2.4 AttribInfo: Name is required, NameType is recommended: default is USER_NAME (1) */
 	attribInfo.setNameType (login_msg.getAttribInfo().getNameType());
 	attribInfo.setName (login_msg.getAttribInfo().getName());
 
-	auto& elementList = provider_.elementList_;
+	auto& elementList = provider_->elementList_;
 	elementList.setAssociatedMetaInfo (GetRwfMajorVersion(), GetRwfMinorVersion());
 /* Clear required for SingleWriteIterator state machine. */
-	auto& it = provider_.element_it_;
+	auto& it = provider_->element_it_;
 	DCHECK (it.isInitialized());
 	it.clear();
 	it.start (elementList);
@@ -410,7 +418,7 @@ gomi::client_t::AcceptLogin (
 	attribInfo.setAttrib (elementList);
 	response.setAttribInfo (attribInfo);
 
-	auto& status = provider_.status_;
+	auto& status = provider_->status_;
 	status.clear();
 /* Item interaction state: RDM 3.2.2 RespMsg: Open. */
 	status.setStreamState (rfa::common::RespStatus::OpenEnum);
@@ -431,7 +439,7 @@ gomi::client_t::AcceptLogin (
 		cumulative_stats_[CLIENT_PC_MMT_LOGIN_RESPONSE_VALIDATED]++;
 		if (rfa::message::MsgValidationWarning == validation_status)
 			LOG(WARNING) << prefix_ << "MMT_LOGIN::validateMsg: { \"warningText\": \"" << warningText << "\" }";
-	} catch (rfa::common::InvalidUsageException& e) {
+	} catch (const rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[CLIENT_PC_MMT_LOGIN_RESPONSE_MALFORMED]++;
 		LOG(ERROR) << prefix_ <<
 			"MMT_LOGIN::InvalidUsageException: { " <<
@@ -440,7 +448,7 @@ gomi::client_t::AcceptLogin (
 			" }";
 	}
 
-	Submit (response, login_token, nullptr);
+	Submit (&response, login_token, nullptr);
 	cumulative_stats_[CLIENT_PC_MMT_LOGIN_ACCEPTED]++;
 	return true;
 }
@@ -452,7 +460,7 @@ gomi::client_t::AcceptLogin (
 void
 gomi::client_t::OnDirectoryRequest (
 	const rfa::message::ReqMsg& request_msg,
-	rfa::sessionLayer::RequestToken& request_token
+	rfa::sessionLayer::RequestToken*const request_token
 	)
 {
 	cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_REQUEST_RECEIVED]++;
@@ -511,11 +519,11 @@ gomi::client_t::OnDirectoryRequest (
 		}
 /* Provides ServiceID */
 		else if (0 != (request_msg.getAttribInfo().getHintMask() & rfa::message::AttribInfo::ServiceIDFlag) &&
-			0 != provider_.GetServiceId() /* service id is unknown */)
+			0 != provider_->GetServiceId() /* service id is unknown */)
 		{
 			const uint32_t service_id = request_msg.getAttribInfo().getServiceID();
-			if (service_id == provider_.GetServiceId()) {
-				SendDirectoryResponse (request_token, provider_.GetServiceName(), filter_mask);
+			if (service_id == provider_->GetServiceId()) {
+				SendDirectoryResponse (request_token, provider_->GetServiceName(), filter_mask);
 			} else {
 /* default to full directory if id does not match */
 				LOG(WARNING) << prefix_ << "Received MMT_DIRECTORY request for unknown service id #" << service_id << ", returning entire directory.";
@@ -528,7 +536,7 @@ gomi::client_t::OnDirectoryRequest (
 			SendDirectoryResponse (request_token, nullptr, filter_mask);
 		}
 /* ignore any error */
-	} catch (rfa::common::InvalidUsageException& e) {
+	} catch (const rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_EXCEPTION]++;
 		LOG(ERROR) << prefix_ << "MMT_DIRECTORY::InvalidUsageException: { "
 				"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
@@ -539,7 +547,7 @@ gomi::client_t::OnDirectoryRequest (
 void
 gomi::client_t::OnDictionaryRequest (
 	const rfa::message::ReqMsg&	request_msg,
-	rfa::sessionLayer::RequestToken& request_token
+	rfa::sessionLayer::RequestToken*const request_token
 	)
 {
 	cumulative_stats_[CLIENT_PC_MMT_DICTIONARY_REQUEST_RECEIVED]++;
@@ -549,7 +557,7 @@ gomi::client_t::OnDictionaryRequest (
 void
 gomi::client_t::OnItemRequest (
 	const rfa::message::ReqMsg&	request_msg,
-	rfa::sessionLayer::RequestToken& request_token
+	rfa::sessionLayer::RequestToken*const request_token
 	)
 {
 	cumulative_stats_[CLIENT_PC_ITEM_REQUEST_RECEIVED]++;
@@ -599,7 +607,7 @@ gomi::client_t::OnItemRequest (
 		const bool is_close             = (request_msg.getInteractionType() == close_request);
 
 /* check for request token in client watchlist. */
-		auto it = items_.find (&request_token);
+		auto it = items_.find (request_token);
 		if (it != items_.end())
 		{
 /* existing request. */
@@ -612,7 +620,7 @@ gomi::client_t::OnItemRequest (
 				if ((bool)sp) {
 					auto stream = sp.get();
 					boost::upgrade_lock<boost::shared_mutex> lock (stream->lock);
-					auto it = stream->requests.find (&request_token);
+					auto it = stream->requests.find (request_token);
 					DCHECK (it != stream->requests.end());
 					boost::upgrade_to_unique_lock<boost::shared_mutex> uniqueLock (lock);
 					stream->requests.erase (it);
@@ -631,11 +639,11 @@ gomi::client_t::OnItemRequest (
 		else
 		{
 /* capture ServiceID */
-			if (0 == provider_.GetServiceId()
-			    && 0 == request_msg.getAttribInfo().getServiceName().compareCase (provider_.GetServiceName()))
+			if (0 == provider_->GetServiceId()
+			    && 0 == request_msg.getAttribInfo().getServiceName().compareCase (provider_->GetServiceName()))
 			{
-				LOG(INFO) << prefix_ << "Detected service id #" << service_id << " for \"" << provider_.GetServiceName() << "\".";
-				provider_.SetServiceId (service_id);
+				LOG(INFO) << prefix_ << "Detected service id #" << service_id << " for \"" << provider_->GetServiceName() << "\".";
+				provider_->SetServiceId (service_id);
 			}
 
 /* new request. */
@@ -671,11 +679,11 @@ gomi::client_t::OnItemRequest (
 				}
 				const std::string parsed_file_name (url.c_str() + file_name.begin, file_name.len);
 /* check for item in inventory */
-				boost::shared_lock<boost::shared_mutex> directory_lock (provider_.directory_lock_);
-				auto it = provider_.directory_.find (parsed_file_name);
-				if (it == provider_.directory_.end()) {
+				boost::shared_lock<boost::shared_mutex> directory_lock (provider_->directory_lock_);
+				auto it = provider_->directory_.find (parsed_file_name);
+				if (it == provider_->directory_.end()) {
 					cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
-					LOG(INFO) << prefix_ << "Closing request for unkown item \"" << parsed_file_name << "\".";
+					LOG(INFO) << prefix_ << "Closing request for unknown item \"" << parsed_file_name << "\".";
 					SendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotFoundEnum);
 					return;
 				}
@@ -684,16 +692,16 @@ gomi::client_t::OnItemRequest (
 				DCHECK ((bool)stream);
 				auto client_request = std::make_shared<request_t> (stream, shared_from_this(), is_streaming_request, use_attribinfo_in_updates);
 				CHECK((bool)client_request);
-				boost::unique_lock<boost::shared_mutex> requests_lock (provider_.requests_lock_);
+				boost::unique_lock<boost::shared_mutex> requests_lock (provider_->requests_lock_);
 				boost::unique_lock<boost::shared_mutex> stream_lock (stream->lock);
-				provider_.requests_.emplace (std::make_pair (&request_token, client_request));	/* weak */
-				stream->requests.emplace (std::make_pair (&request_token, client_request));	/* strong */
+				provider_->requests_.emplace (std::make_pair (request_token, client_request));	/* weak */
+				stream->requests.emplace (std::make_pair (request_token, client_request));	/* strong */
 
 /* forward request to worker pool */
-				auto& request = provider_.request_;
-				auto& msg = provider_.msg_;
+				auto& request = provider_->request_;
+				auto& msg = provider_->msg_;
 				request.set_msg_type (provider::Request::MSG_SNAPSHOT);
-				request.mutable_refresh()->set_token ((uintptr_t)&request_token);
+				request.mutable_refresh()->set_token ((uintptr_t)request_token);
 				request.mutable_refresh()->set_service_id (service_id);
 				request.mutable_refresh()->set_model_type (model_type);
 				request.mutable_refresh()->set_item_name (item_name, item_name_len);
@@ -701,8 +709,8 @@ gomi::client_t::OnItemRequest (
 				request.mutable_refresh()->set_rwf_minor_version (rwf_minor_version_);
 				int rc = zmq_msg_init_size (&msg, request.ByteSize());
 				CHECK(0 == rc);
-				request.SerializeToArray (zmq_msg_data (&msg), (int)zmq_msg_size (&msg));
-				auto sock = provider_.sender_.get();
+				request.SerializeToArray (zmq_msg_data (&msg), static_cast<int> (zmq_msg_size (&msg)));
+				auto sock = provider_->request_sock_.get();
 				rc = zmq_send (sock, &msg, 0);
 				CHECK(0 == rc);
 				rc = zmq_msg_close (&msg);
@@ -710,12 +718,12 @@ gomi::client_t::OnItemRequest (
 			}
 		}
 /* ignore any error */
-	} catch (rfa::common::InvalidUsageException& e) {
+	} catch (const rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[CLIENT_PC_ITEM_EXCEPTION]++;
 		LOG(ERROR) << prefix_ << "InvalidUsageException: { "
 				   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\"" <<
 				", " << request_msg <<
-				", \"RequestToken\": " << (intptr_t)&request_token <<
+				", \"RequestToken\": " << (uintptr_t)request_token <<
 				" }";
 	}
 }
@@ -740,7 +748,7 @@ gomi::client_t::OnOMMInactiveClientSessionEvent (
 /* remove requests from item streams. */
 		VLOG(2) << prefix_ << "Removing client from " << items_.size() << " item streams.";
 		std::for_each (items_.begin(), items_.end(),
-			[&](const std::pair<rfa::sessionLayer::RequestToken*, std::weak_ptr<item_stream_t>>& item)
+			[&](const std::pair<rfa::sessionLayer::RequestToken*const, std::weak_ptr<item_stream_t>>& item)
 		{
 			auto sp = item.second.lock();
 			if (!(bool)sp)
@@ -753,11 +761,11 @@ gomi::client_t::OnOMMInactiveClientSessionEvent (
 			VLOG(2) << prefix_ << sp->rfa_name;
 		});
 /* forward upstream to remove reference to this. */
-		provider_.EraseClientSession (handle_);
+		provider_->EraseClientSession (handle_);
 /* handle is now invalid. */
 		handle_ = nullptr;
 /* ignore any error */
-	} catch (rfa::common::InvalidUsageException& e) {
+	} catch (const rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[CLIENT_PC_OMM_INACTIVE_CLIENT_SESSION_EXCEPTION]++;
 		LOG(ERROR) << prefix_ << "OMMInactiveClientSession::InvalidUsageException: { "
 				"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
@@ -772,7 +780,7 @@ gomi::client_t::OnOMMInactiveClientSessionEvent (
  */
 bool
 gomi::client_t::SendDirectoryResponse (
-	rfa::sessionLayer::RequestToken& request_token,
+	rfa::sessionLayer::RequestToken*const request_token,
 	const char* service_name,
 	uint32_t filter_mask
 	)
@@ -781,7 +789,7 @@ gomi::client_t::SendDirectoryResponse (
 
 /* 7.5.9.1 Create a response message (4.2.2) */
 	rfa::message::RespMsg response;
-	provider_.GetDirectoryResponse (&response, rwf_major_version_, rwf_minor_version_, service_name, filter_mask, rfa::rdm::REFRESH_SOLICITED);
+	provider_->GetDirectoryResponse (&response, rwf_major_version_, rwf_minor_version_, service_name, filter_mask, rfa::rdm::REFRESH_SOLICITED);
 
 /* 4.2.8 Message Validation.  RFA provides an interface to verify that
  * constructed messages of these types conform to the Reuters Domain
@@ -794,7 +802,7 @@ gomi::client_t::SendDirectoryResponse (
 		cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_VALIDATED]++;
 		if (rfa::message::MsgValidationWarning == validation_status)
 			LOG(ERROR) << prefix_ << "MMT_DIRECTORY::validateMsg: { \"warningText\": \"" << warningText << "\" }";
-	} catch (rfa::common::InvalidUsageException& e) {
+	} catch (const rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_MALFORMED]++;
 		LOG(ERROR) << prefix_ <<
 			"MMT_DIRECTORY::InvalidUsageException: { " <<
@@ -804,14 +812,14 @@ gomi::client_t::SendDirectoryResponse (
 	}
 
 /* Create and throw away first token for MMT_DIRECTORY. */
-	Submit (response, request_token, nullptr);
+	Submit (&response, request_token, nullptr);
 	cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_SENT]++;
 	return true;
 }
 
 bool
 gomi::client_t::SendClose (
-	rfa::sessionLayer::RequestToken& request_token,
+	rfa::sessionLayer::RequestToken*const request_token,
 	uint32_t service_id,
 	uint8_t model_type,
 	const char* name_c,
@@ -820,7 +828,7 @@ gomi::client_t::SendClose (
 	)
 {
 	VLOG(2) << prefix_ << "Sending item close { "
-		  "\"RequestToken\": " << (intptr_t)&request_token <<
+		  "\"RequestToken\": " << (uintptr_t)request_token <<
 		", \"ServiceID\": " << service_id <<
 		", \"MsgModelType\": " << (int)model_type <<
 		", \"Name\": \"" << name_c << "\""
@@ -828,7 +836,7 @@ gomi::client_t::SendClose (
 		", \"StatusCode\": " << (int)status_code <<
 		" }";
 /* 7.5.9.1 Create a response message (4.2.2) */
-	auto& response = provider_.response_;
+	auto& response = provider_->response_;
 	response.clear();
 /* 7.5.9.2 Set the message model type of the response. */
 	response.setMsgModelType (model_type);
@@ -841,7 +849,7 @@ gomi::client_t::SendClose (
  */
 	if (use_attribinfo_in_updates) {
 /* 7.5.9.5 Create or re-use a request attribute object (4.2.4) */
-		auto& attribInfo = provider_.attribInfo_;
+		auto& attribInfo = provider_->attribInfo_;
 		attribInfo.clear();
 		attribInfo.setNameType (rfa::rdm::INSTRUMENT_NAME_RIC);
 		const RFA_String name (name_c, 0, false);	/* reference */
@@ -850,7 +858,7 @@ gomi::client_t::SendClose (
 		response.setAttribInfo (attribInfo);
 	}
 	
-	auto& status = provider_.status_;
+	auto& status = provider_->status_;
 	status.clear();
 /* Item interaction state: Open, Closed, ClosedRecover, Redirected, NonStreaming, or Unspecified. */
 	status.setStreamState (rfa::common::RespStatus::ClosedEnum);
@@ -872,7 +880,7 @@ gomi::client_t::SendClose (
 		cumulative_stats_[CLIENT_PC_ITEM_VALIDATED]++;
 		if (rfa::message::MsgValidationWarning == validation_status)
 			LOG(ERROR) << prefix_ << "validateMsg: { \"warningText\": \"" << warningText << "\" }";
-	} catch (rfa::common::InvalidUsageException& e) {
+	} catch (const rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[CLIENT_PC_ITEM_MALFORMED]++;
 		LOG(ERROR) << prefix_ <<
 			"InvalidUsageException: { " <<
@@ -882,7 +890,7 @@ gomi::client_t::SendClose (
 	}
 #endif
 
-	Submit (response, request_token, nullptr);	
+	Submit (&response, request_token, nullptr);	
 	cumulative_stats_[CLIENT_PC_ITEM_CLOSED]++;
 	return true;
 }
@@ -891,12 +899,12 @@ gomi::client_t::SendClose (
  */
 uint32_t
 gomi::client_t::Submit (
-	rfa::message::RespMsg& response,
-	rfa::sessionLayer::RequestToken& token,
+	rfa::message::RespMsg*const response,
+	rfa::sessionLayer::RequestToken*const token,
 	void* closure
 	)
 {
-	return provider_.Submit (static_cast<rfa::common::Msg&> (response), token, closure);
+	return provider_->Submit (response, token, closure);
 }
 
 /* eof */

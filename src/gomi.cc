@@ -47,7 +47,7 @@ static const int kRdmActiveDateId		= 17;
 static const uint32_t kQuoteId = 40002;
 
 /* Default FlexRecord fields. */
-static const char* kDefaultLastPriceField = "LastPrice";
+static const char* kDefaultLastPriceField  = "LastPrice";
 static const char* kDefaultTickVolumeField = "TickVolume";
 
 /* RIC request fields. */
@@ -116,7 +116,7 @@ ParseBinDecl (
 	if (std::string::npos == pos1)
 		return false;
 	bin->bin_name = str.substr (0, pos1);
-	VLOG(1) << "bin name: " << bin->bin_name;
+	DVLOG(1) << "bin name: " << bin->bin_name;
 
 /* open time */
 	std::string::size_type pos2 = str.find_first_of ("-", pos1);
@@ -124,13 +124,13 @@ ParseBinDecl (
 		return false;
 	++pos1;
 	const std::string start (str.substr (pos1, pos2 - pos1));
-	VLOG(1) << "bin start: " << start;
+	DVLOG(1) << "bin start: " << start;
 	bin->bin_start = boost::posix_time::duration_from_string (start);
 
 /* close time */
 	++pos2;
 	const std::string end (str.substr (pos2));
-	VLOG(1) << "bin start: " << end;
+	DVLOG(1) << "bin start: " << end;
 	bin->bin_end = boost::posix_time::duration_from_string (end);
 
 /* time zone */
@@ -164,7 +164,6 @@ class gomi::worker_t
 {
 public:
 	worker_t (
-		std::shared_ptr<provider_t> provider,
 		const boost::unordered_map<std::string, std::shared_ptr<archive_stream_t>>& directory,
 		const boost::local_time::tz_database& tzdb,
 		const boost::local_time::time_zone_ptr TZ,
@@ -175,10 +174,9 @@ public:
 		id_ (id),
 		zmq_context_ (zmq_context),
 		manager_ (nullptr),
-		response_ (false),	/* reference */
+		respmsg_ (false),	/* reference */
 		fields_ (false),
 		attribInfo_ (false),
-		provider_ (provider),
 		directory_ (directory),
 		tzdb_ (tzdb),
 		TZ_ (TZ),
@@ -193,8 +191,10 @@ public:
 	~worker_t()
 	{
 /* shutdown socket before context */
-		CHECK (receiver_.use_count() <= 1);
-		receiver_.reset();
+		CHECK (request_sock_.use_count() <= 1);
+		request_sock_.reset();
+		CHECK (response_sock_.use_count() <= 1);
+		response_sock_.reset();
 		zmq_context_.reset();
 	}
 
@@ -205,12 +205,17 @@ public:
 
 		try {
 /* Setup 0mq sockets */
-			receiver_.reset (zmq_socket (zmq_context_.get(), ZMQ_PULL), zmq_close_deleter);
-			CHECK((bool)receiver_);
-			rc = zmq_connect (receiver_.get(), "inproc://gomi/refresh");
+			request_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PULL), zmq_close_deleter);
+			CHECK((bool)request_sock_);
+			rc = zmq_connect (request_sock_.get(), "inproc://gomi/rfa/request");
 			CHECK(0 == rc);
 /* Also bind for terminating interrupt. */
-			rc = zmq_connect (receiver_.get(), "inproc://gomi/abort");
+			rc = zmq_connect (request_sock_.get(), "inproc://gomi/worker/abort");
+			CHECK(0 == rc);
+/* Response image socket */
+			response_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PUSH), zmq_close_deleter);
+			CHECK((bool)response_sock_);
+			rc = zmq_connect (response_sock_.get(), "inproc://gomi/rfa/response");
 			CHECK(0 == rc);
 		} catch (std::exception& e) {
 			LOG(ERROR) << prefix_ << "ZeroMQ::Exception: { "
@@ -228,7 +233,7 @@ public:
 			CHECK (config_.maximum_data_size > 0);
 			single_write_it_ = std::make_shared<rfa::data::SingleWriteIterator> ();
 			CHECK ((bool)single_write_it_);
-			single_write_it_->initialize (*fields_.get(), config_.maximum_data_size);
+			single_write_it_->initialize (*fields_.get(), static_cast<int> (config_.maximum_data_size));
 			CHECK (single_write_it_->isInitialized());
 		} catch (rfa::common::InvalidUsageException& e) {
 			LOG(ERROR) << prefix_ << "InvalidUsageException: { "
@@ -265,13 +270,18 @@ public:
 		{
 			if (!GetRequest (&request_))
 				continue;
-			if (request_.msg_type() == provider::Request::MSG_ABORT) {
-				LOG(INFO) << prefix_ << "Received interrupt request.";
+			
+			switch (request_.msg_type()) {
+			case provider::Request::MSG_SNAPSHOT:
 				break;
-			}
-			if (!(request_.msg_type() == provider::Request::MSG_SNAPSHOT
-				&& request_.has_refresh()))
-			{
+			case provider::Request::MSG_SUBSCRIPTION:
+			case provider::Request::MSG_REFRESH:
+				LOG(ERROR) << prefix_ << "Received unsupported request.";
+				continue;
+			case provider::Request::MSG_ABORT:
+				LOG(INFO) << prefix_ << "Received interrupt request.";
+				goto close_worker;
+			default:
 				LOG(ERROR) << prefix_ << "Received unknown request.";
 				continue;
 			}
@@ -280,33 +290,35 @@ public:
 
 			try {
 /* forward to main application */
-				OnRequest (*reinterpret_cast<rfa::sessionLayer::RequestToken*> ((uintptr_t)request_.refresh().token()),
+				OnRequest (reinterpret_cast<rfa::sessionLayer::RequestToken*> (static_cast<uintptr_t> (request_.refresh().token())),
 					   request_.refresh().service_id(),
 					   request_.refresh().model_type(),
 					   request_.refresh().item_name().c_str(),
+					   request_.msg_type(),
 					   request_.refresh().rwf_major_version(),
 					   request_.refresh().rwf_minor_version());
 			} catch (std::exception& e) {
-				LOG(ERROR) << prefix_ << "ProcessRequest::Exception: { "
+				LOG(ERROR) << prefix_ << "OnRequest::Exception: { "
 					"\"What\": \"" << e.what() << "\""
 					" }";
 			}
 		}
 
+close_worker:
 		LOG(INFO) << prefix_ << "Worker closed.";
 	}
 
 	unsigned GetId() const { return id_; }
 
 protected:
-	bool GetRequest (provider::Request* request)
+	bool GetRequest (provider::Request*const request)
 	{
 		int rc;
 
 		rc = zmq_msg_init (&msg_);
 		CHECK(0 == rc);
 		VLOG(1) << prefix_ << "Awaiting new job.";
-		rc = zmq_recv (receiver_.get(), &msg_, 0);
+		rc = zmq_recv (request_sock_.get(), &msg_, 0);
 		CHECK(0 == rc);
 		if (!request->ParseFromArray (zmq_msg_data (&msg_), (int)zmq_msg_size (&msg_))) {
 			LOG(ERROR) << prefix_ << "Received invalid request.";
@@ -319,7 +331,92 @@ protected:
 		return true;
 	}
 
-	void ParseRIC (const char* ric, size_t ric_len, std::string* item_name, bin_decl_t* bin_decl, unsigned* day_offset)
+	void OnRequest (
+		rfa::sessionLayer::RequestToken*const request_token,
+		uint32_t service_id,
+		uint8_t model_type,
+		const char* item_name,
+		provider::Request_MsgType msg_type,
+		uint8_t rwf_major_version,
+		uint8_t rwf_minor_version
+		)
+	{
+		OnBinRequest (request_token, service_id, model_type, item_name, rwf_major_version, rwf_minor_version);
+	}
+
+	void OnBinRequest (
+		rfa::sessionLayer::RequestToken*const token,
+		uint32_t service_id,
+		uint8_t model_type,
+		const char* stream_name_c,
+		uint8_t rwf_major_version,
+		uint8_t rwf_minor_version
+		)
+	{
+		VLOG(2) << prefix_ << "Bin request: { "
+			  "\"RequestToken\": \"" << (uintptr_t)&token << "\""
+			", \"ServiceID\": " << service_id <<
+			", \"MsgModelType\": " << (int)model_type <<
+			", \"Name\": \"" << stream_name_c << "\""
+			", \"RwfMajorVersion\": " << (int)rwf_major_version <<
+			", \"RwfMinorVersion\": " << (int)rwf_minor_version <<
+			" }";
+
+/* derived symbol name */
+		const RFA_String stream_name (stream_name_c, 0, false);
+
+/* decompose request */
+		std::string item_name;
+		bin_decl_t bin_decl;
+		unsigned day_offset = 0;
+
+		bin_decl.bin_tz = TZ_;
+		bin_decl.bin_day_count = std::stoi (config_.day_count);
+		ParseRIC (stream_name_c, strlen (stream_name_c), &item_name, &bin_decl, &day_offset);
+
+/* start of bin */
+		using namespace boost::local_time;
+		const auto now_in_tz = local_sec_clock::local_time (bin_decl.bin_tz);
+		const auto today_in_tz = now_in_tz.local_time().date();
+		auto start_date (today_in_tz);
+		if (day_offset > 0) {
+			while (!is_business_day (start_date))
+				start_date -= boost::gregorian::date_duration (1);
+			vhayu::business_day_iterator bd_itr (start_date);
+			for (unsigned offset = day_offset; offset > 0; --offset)
+				--bd_itr;
+			start_date = *bd_itr;
+		}
+
+/* TREP-VA cached symbol handle */
+		auto directory_it = directory_.find (item_name);
+		DCHECK(directory_.end() != directory_it);
+
+/* run analytic on bin and send result */
+		try {
+			bin_t bin (bin_decl, directory_it->second->handle, kDefaultLastPriceField, kDefaultTickVolumeField);
+			VLOG(2) << prefix_ << "Processing bin: " << bin_decl;
+			bin.Calculate (start_date, work_area_.get(), view_element_.get());
+			SendSnapshot (bin, service_id, stream_name, rwf_major_version, rwf_minor_version, token);
+		} catch (rfa::common::InvalidUsageException& e) {
+			LOG(ERROR) << prefix_ << "InvalidUsageException: { " <<
+					"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
+					" }";
+		} catch (std::exception& e) {
+			LOG(ERROR) << prefix_ << "Calculate::Exception: { "
+					"\"What\": \"" << e.what() << "\""
+					" }";
+		}
+		VLOG(2) << prefix_ << "Request complete.";
+	}
+
+	void ParseRIC (
+		const char* ric,
+		size_t ric_len,
+		std::string* item_name,
+		bin_decl_t* bin_decl,
+		unsigned* day_offset
+		)
 	{
 		url_.assign ("vta://localhost");
 		url_.append (ric, ric_len);
@@ -372,33 +469,35 @@ protected:
 		}
 	}
 
-	void SendReply (
+	void SendSnapshot (
 		const bin_t& bin,
+		uint32_t service_id,
 		const RFA_String& stream_name,
 		uint8_t rwf_major_version,
 		uint8_t rwf_minor_version,
-		rfa::sessionLayer::RequestToken& token
+		rfa::sessionLayer::RequestToken*const token
 		)
 	{
 /* 7.4.8.1 Create a response message (4.2.2) */
-		response_.clear();
+		respmsg_.clear();
 
 /* 7.4.8.2 Create or re-use a request attribute object (4.2.4) */
 		attribInfo_.clear();
 		attribInfo_.setNameType (rfa::rdm::INSTRUMENT_NAME_RIC);
-		attribInfo_.setServiceID (provider_->GetServiceId());
+		attribInfo_.setServiceID (service_id);
 		attribInfo_.setName (stream_name);
-		response_.setAttribInfo (attribInfo_);
+		respmsg_.setAttribInfo (attribInfo_);
 
 /* 7.4.8.3 Set the message model type of the response. */
-		response_.setMsgModelType (rfa::rdm::MMT_MARKET_PRICE);
+		respmsg_.setMsgModelType (rfa::rdm::MMT_MARKET_PRICE);
 /* 7.4.8.4 Set response type, response type number, and indication mask. */
-		response_.setRespType (rfa::message::RespMsg::RefreshEnum);
-		response_.setIndicationMask ( rfa::message::RespMsg::DoNotCacheFlag
-					    | rfa::message::RespMsg::DoNotFilterFlag
-					    | rfa::message::RespMsg::RefreshCompleteFlag
-					    | rfa::message::RespMsg::DoNotRippleFlag);
+		respmsg_.setRespType (rfa::message::RespMsg::RefreshEnum);
 
+/* for snapshot images do not cache */
+		respmsg_.setIndicationMask (rfa::message::RespMsg::DoNotFilterFlag     |
+					    rfa::message::RespMsg::RefreshCompleteFlag |
+					    rfa::message::RespMsg::DoNotRippleFlag     |
+					    rfa::message::RespMsg::DoNotCacheFlag);
 /* 4.3.1 RespMsg.Payload */
 // not std::map :(  derived from rfa::common::Data
 		fields_->setAssociatedMetaInfo (rwf_major_version, rwf_minor_version);
@@ -485,7 +584,7 @@ protected:
 		it.setDate (year, month, day);
 
 		it.complete();
-		response_.setPayload (*fields_.get());
+		respmsg_.setPayload (*fields_.get());
 
 /** Optional: but require to replace stale values in cache when stale values are supported. **/
 		status_.clear();
@@ -493,7 +592,9 @@ protected:
 		status_.setStreamState (rfa::common::RespStatus::NonStreamingEnum);
 /* Data quality state: Ok, Suspect, or Unspecified. */
 		status_.setDataState (rfa::common::RespStatus::OkEnum);
-		response_.setRespStatus (status_);
+/* Error code, e.g. NotFound, InvalidArgument, ... */
+		status_.setStatusCode (rfa::common::RespStatus::NoneEnum);
+		respmsg_.setRespStatus (status_);
 
 #ifdef DEBUG
 /* 4.2.8 Message Validation.  RFA provides an interface to verify that
@@ -503,87 +604,28 @@ protected:
 		uint8_t validation_status = rfa::message::MsgValidationError;
 		try {
 			RFA_String warningText;
-			validation_status = response.validateMsg (&warningText);
+			validation_status = respmsg_.validateMsg (&warningText);
 			if (rfa::message::MsgValidationWarning == validation_status)
 				LOG(ERROR) << prefix_ << "validateMsg: { \"warningText\": \"" << warningText << "\" }";
 		} catch (rfa::common::InvalidUsageException& e) {
 			LOG(ERROR) << prefix_ << "InvalidUsageException: { " <<
 					   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
-					", " << response_ <<
+					", " << respmsg_ <<
 				      " }";
 		}
 #endif
-		provider_->SendReply (response_, token);
-		VLOG(3) << prefix_ << "Response sent.";
-	}
-
-	void OnRequest (
-		rfa::sessionLayer::RequestToken& request_token,
-		uint32_t service_id,
-		uint8_t model_type,
-		const char* name_c,
-		uint8_t rwf_major_version,
-		uint8_t rwf_minor_version
-		)
-	{
-		VLOG(2) << prefix_ << "Bin request: { "
-			  "\"RequestToken\": \"" << (intptr_t)&request_token << "\""
-			", \"ServiceID\": " << service_id <<
-			", \"MsgModelType\": " << (int)model_type <<
-			", \"Name\": \"" << name_c << "\""
-			", \"RwfMajorVersion\": " << (int)rwf_major_version <<
-			", \"RwfMinorVersion\": " << (int)rwf_minor_version <<
-			" }";
-
-		DCHECK(service_id == provider_->GetServiceId());
-		DCHECK(model_type == rfa::rdm::MMT_MARKET_PRICE);
-
-/* derived symbol name */
-		const RFA_String stream_name (name_c, 0, false);
-
-/* decompose request */
-		std::string item_name;
-		bin_decl_t bin_decl;
-		unsigned day_offset = 0;
-
-		bin_decl.bin_tz = TZ_;
-		bin_decl.bin_day_count = std::stoi (config_.day_count);
-		ParseRIC (name_c, strlen (name_c), &item_name, &bin_decl, &day_offset);
-
-/* start of bin */
-		using namespace boost::local_time;
-		const auto now_in_tz = local_sec_clock::local_time (bin_decl.bin_tz);
-		const auto today_in_tz = now_in_tz.local_time().date();
-		auto start_date (today_in_tz);
-		if (day_offset > 0) {
-			while (!is_business_day (start_date))
-				start_date -= boost::gregorian::date_duration (1);
-			vhayu::business_day_iterator bd_itr (start_date);
-			for (unsigned offset = day_offset; offset > 0; --offset)
-				--bd_itr;
-			start_date = *bd_itr;
-		}
-
-/* TREP-VA cached symbol handle */
-		auto directory_it = directory_.find (item_name);
-		DCHECK(directory_.end() != directory_it);
-
-/* run analytic on bin and send result */
-		try {
-			bin_t bin (bin_decl, directory_it->second->handle, kDefaultLastPriceField, kDefaultTickVolumeField);
-			VLOG(2) << prefix_ << "Processing bin: " << bin_decl;
-			bin.Calculate (start_date, work_area_.get(), view_element_.get());
-			SendReply (bin, stream_name, rwf_major_version, rwf_minor_version, request_token);
-		} catch (rfa::common::InvalidUsageException& e) {
-			LOG(ERROR) << prefix_ << "InvalidUsageException: { " <<
-					"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
-					" }";
-		} catch (std::exception& e) {
-			LOG(ERROR) << prefix_ << "Calculate::Exception: { "
-					"\"What\": \"" << e.what() << "\""
-					" }";
-		}
-		VLOG(2) << prefix_ << "Request complete.";
+/* Pack RFA message into buffer and embed within Protobuf and enqueue to RFA publisher */
+		const rfa::common::Buffer& buffer = respmsg_.getEncodedBuffer();
+		response_.set_msg_type (provider::Response::MSG_SNAPSHOT);
+		response_.set_token (reinterpret_cast<uintptr_t> (token));
+		response_.set_encoded_buffer (buffer.c_buf(), buffer.size());
+		int rc = zmq_msg_init_size (&msg_, response_.ByteSize());
+		CHECK(0 == rc);
+		response_.SerializeToArray (zmq_msg_data (&msg_), static_cast<int> (zmq_msg_size (&msg_)));
+		rc = zmq_send (response_sock_.get(), &msg_, 0);
+		CHECK(0 == rc);
+		rc = zmq_msg_close (&msg_);
+		CHECK(0 == rc);
 	}
 
 /* worker unique identifier */
@@ -593,8 +635,11 @@ protected:
 /* 0mq context */
 	std::shared_ptr<void> zmq_context_;
 
-/* Socket to receive refresh requests on. */
-	std::shared_ptr<void> receiver_;
+/* Socket to receive requests on. */
+	std::shared_ptr<void> request_sock_;
+
+/* response socket for sending images back. */
+	std::shared_ptr<void> response_sock_;
 
 /* Incoming 0mq message */
 	zmq_msg_t msg_;
@@ -611,7 +656,8 @@ protected:
 	std::shared_ptr<FlexRecViewElement> view_element_;
 
 /* Outgoing rfa message */
-	rfa::message::RespMsg response_;
+	rfa::message::RespMsg respmsg_;
+	provider::Response response_;
 
 /* Publish fields. */
 	std::shared_ptr<rfa::data::FieldList> fields_;	/* no copy ctor */
@@ -622,7 +668,6 @@ protected:
 	std::shared_ptr<rfa::data::SingleWriteIterator> single_write_it_;	/* no copy ctor */
 
 /* application reference */
-	std::shared_ptr<provider_t> provider_;
 	const boost::unordered_map<std::string, std::shared_ptr<archive_stream_t>>& directory_;
 	const boost::local_time::tz_database& tzdb_;
 	const boost::local_time::time_zone_ptr TZ_;
@@ -711,16 +756,30 @@ gomi::gomi_t::init (
 bool
 gomi::gomi_t::Init()
 {
+	std::function<int(void*)> zmq_term_deleter = zmq_term;
+	std::function<int(void*)> zmq_close_deleter = zmq_close;
+
 	std::vector<std::string> symbolmap;
 
 	LOG(INFO) << config_;
 
 	try {
 /* ZeroMQ context. */
-		std::function<int(void*)> zmq_term_deleter = zmq_term;
 		zmq_context_.reset (zmq_init (0), zmq_term_deleter);
 		CHECK((bool)zmq_context_);
-	} catch (std::exception& e) {
+
+/* push for event loop interrupt */
+		event_pump_abort_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PUSH), zmq_close_deleter);
+		CHECK((bool)event_pump_abort_sock_);
+		int rc = zmq_bind (event_pump_abort_sock_.get(), "inproc://gomi/event/abort");
+		CHECK(0 == rc);
+
+/* pull for RFA responses */
+		response_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PULL), zmq_close_deleter);
+		CHECK((bool)response_sock_);
+		rc = zmq_bind (response_sock_.get(), "inproc://gomi/rfa/response");
+		CHECK(0 == rc);
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "ZeroMQ::Exception: { "
 			"\"What\": \"" << e.what() << "\" }";
 		return false;
@@ -735,10 +794,10 @@ gomi::gomi_t::Init()
 			LOG(ERROR) << "TZ not listed within configured time zone specifications.";
 			return false;
 		}
-	} catch (boost::local_time::data_not_accessible& e) {
+	} catch (const boost::local_time::data_not_accessible& e) {
 		LOG(ERROR) << "Time zone specifications cannot be loaded: " << e.what();
 		return false;
-	} catch (boost::local_time::bad_field_count& e) {
+	} catch (const boost::local_time::bad_field_count& e) {
 		LOG(ERROR) << "Time zone specifications malformed: " << e.what();
 		return false;
 	}
@@ -755,7 +814,7 @@ gomi::gomi_t::Init()
 			}
 			bins_.insert (bin);
 		}
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "BinDecl::Exception: { "
 			"\"What\": \"" << e.what() << "\" }";
 		return false;
@@ -767,7 +826,7 @@ gomi::gomi_t::Init()
 			LOG(ERROR) << "Cannot read symbolmap file: " << config_.symbolmap;
 			return false;
 		}
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "SymbolMap::Exception: { "
 			"\"What\": \"" << e.what() << "\" }";
 		return false;
@@ -806,14 +865,14 @@ gomi::gomi_t::Init()
 			CHECK (status);
 			directory_.emplace (std::make_pair (symbol, std::move (stream)));
 		});
-	} catch (rfa::common::InvalidUsageException& e) {
+	} catch (const rfa::common::InvalidUsageException& e) {
 		LOG(ERROR) << "InvalidUsageException: { "
 			  "\"Severity\": \"" << severity_string (e.getSeverity()) << "\""
 			", \"Classification\": \"" << classification_string (e.getClassification()) << "\""
 			", \"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			" }";
 		return false;
-	} catch (rfa::common::InvalidConfigurationException& e) {
+	} catch (const rfa::common::InvalidConfigurationException& e) {
 		LOG(ERROR) << "InvalidConfigurationException: { "
 			  "\"Severity\": \"" << severity_string (e.getSeverity()) << "\""
 			", \"Classification\": \"" << classification_string (e.getClassification()) << "\""
@@ -822,7 +881,7 @@ gomi::gomi_t::Init()
 			", \"ParameterValue\": \"" << e.getParameterValue() << "\""
 			" }";
 		return false;
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "Rfa::Exception: { "
 			"\"What\": \"" << e.what() << "\" }";
 		return false;
@@ -831,15 +890,15 @@ gomi::gomi_t::Init()
 	try {
 		std::function<int(void*)> zmq_close_deleter = zmq_close;
 /* Worker abort socket. */
-		abort_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PUSH), zmq_close_deleter);
-		CHECK((bool)abort_sock_);
-		int rc = zmq_bind (abort_sock_.get(), "inproc://gomi/abort");
+		worker_abort_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PUSH), zmq_close_deleter);
+		CHECK((bool)worker_abort_sock_);
+		int rc = zmq_bind (worker_abort_sock_.get(), "inproc://gomi/worker/abort");
 		CHECK(0 == rc);
 /* Worker threads. */
 		for (size_t i = 0; i < config_.worker_count; ++i) {
 			const unsigned worker_id = (unsigned)(1 + i);
 			LOG(INFO) << "Spawning worker #" << worker_id;
-			auto worker = std::make_shared<worker_t> (provider_, directory_, tzdb_, TZ_, config_, zmq_context_, worker_id);
+			auto worker = std::make_shared<worker_t> (directory_, tzdb_, TZ_, config_, zmq_context_, worker_id);
 			if (!(bool)worker)
 				return false;
 			auto thread = std::make_shared<boost::thread> ([worker](){ if (worker->Init()) worker->Run(); });
@@ -847,7 +906,7 @@ gomi::gomi_t::Init()
 				return false;
 			workers_.emplace_front (std::make_pair (worker, thread));
 		}
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "ZeroMQ::Exception: { "
 			"\"What\": \"" << e.what() << "\" }";
 		return false;
@@ -855,14 +914,14 @@ gomi::gomi_t::Init()
 
 	try {
 /* No main loop inside this thread, must spawn new thread for message pump. */
-		event_pump_.reset (new event_pump_t (event_queue_));
+		event_pump_.reset (new event_pump_t (zmq_context_, response_sock_, provider_, event_queue_));
 		if (!(bool)event_pump_)
 			return false;
 
-		event_thread_.reset (new boost::thread (*event_pump_.get()));
+		event_thread_.reset (new boost::thread ([this]() { if (event_pump_->Init()) event_pump_->Run(); }));
 		if (!(bool)event_thread_)
 			return false;
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "EventPump::Exception: { "
 			"\"What\": \"" << e.what() << "\" }";
 		return false;
@@ -875,7 +934,7 @@ gomi::gomi_t::Init()
 			if (!(bool)snmp_agent_)
 				return false;
 		}
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "SnmpAgent::Exception: { "
 			"\"What\": \"" << e.what() << "\" }";
 		return false;
@@ -885,7 +944,7 @@ gomi::gomi_t::Init()
 /* Register Tcl commands with TREP-VA search engine and await callbacks. */
 		if (!RegisterTclApi (getId()))
 			return false;
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "TclApi::Exception: { "
 			"\"What\": \"" << e.what() << "\" }";
 		return false;
@@ -898,6 +957,10 @@ gomi::gomi_t::Init()
 void
 gomi::gomi_t::Clear()
 {
+/* Stop generating new messages */
+	if ((bool)event_queue_)
+		event_queue_->deactivate();
+
 /* Interrupt worker threads. */
 	if (!workers_.empty()) {
 		LOG(INFO) << "Reviewing worker threads.";
@@ -908,8 +971,8 @@ gomi::gomi_t::Clear()
 		for (auto it = workers_.begin(); it != workers_.end(); ++it) {
 			if ((bool)it->second && it->second->joinable()) {
 				zmq_msg_init_size (&msg, request.ByteSize());
-				request.SerializeToArray (zmq_msg_data (&msg), (int)zmq_msg_size (&msg));
-				zmq_send (abort_sock_.get(), &msg, 0);
+				request.SerializeToArray (zmq_msg_data (&msg), static_cast<int> (zmq_msg_size (&msg)));
+				zmq_send (worker_abort_sock_.get(), &msg, 0);
 				zmq_msg_close (&msg);
 				++active_threads;
 			}
@@ -919,37 +982,56 @@ gomi::gomi_t::Clear()
 			for (auto it = workers_.begin(); it != workers_.end(); ++it) {
 				if ((bool)it->second && it->second->joinable())
 					it->second->join();
-				LOG(INFO) << "Thread #" << it->first->GetId() << "joined.";
+				LOG(INFO) << "Thread #" << it->first->GetId() << " joined.";
 				it->first.reset();
 			}
 		}
 		LOG(INFO) << "All worker threads joined.";
 	}
+	CHECK (worker_abort_sock_.use_count() <= 1);
+	worker_abort_sock_.reset();
 
 /* Close SNMP agent. */
 	snmp_agent_.reset();
 
-/* Signal message pump thread to exit. */
-	if ((bool)event_queue_)
-		event_queue_->deactivate();
 /* Drain and close event queue. */
-	if ((bool)event_thread_)
+	if ((bool)event_thread_ && event_thread_->joinable()) {
+		provider::Request request;
+		zmq_msg_t msg;
+		LOG(INFO) << "Sending interrupt to event pump thread.";
+		request.set_msg_type (provider::Request::MSG_ABORT);
+		zmq_msg_init_size (&msg, request.ByteSize());
+		request.SerializeToArray (zmq_msg_data (&msg), static_cast<int> (zmq_msg_size (&msg)));
+		zmq_send (event_pump_abort_sock_.get(), &msg, 0);
+		zmq_msg_close (&msg);	
 		event_thread_->join();
+		LOG(INFO) << "Event pump thread joined.";
+		if ((bool)event_pump_)
+			event_pump_->Clear();
+	}
+	CHECK (event_pump_abort_sock_.use_count() <= 1);
+	event_pump_abort_sock_.reset();
 
-/* Release everything with an RFA dependency. */
+/* Release everything with an 0mq & RFA dependency. */
 	event_thread_.reset();
 	event_pump_.reset();
 	directory_.clear();
 /* Release 0mq sockets before context */
-	assert (provider_.use_count() <= 1);
+	if ((bool)provider_)
+		provider_->Clear();
+	CHECK (provider_.use_count() <= 1);
 	provider_.reset();
-	abort_sock_.reset();
+	CHECK (response_sock_.use_count() <= 1);
+	response_sock_.reset();
+/* Bring down 0mq context as all sockets are closed. */
+	CHECK (zmq_context_.use_count() <= 1);
 	zmq_context_.reset();
-	assert (log_.use_count() <= 1);
+/* Release everything remaining with an RFA dependency. */
+	CHECK (log_.use_count() <= 1);
 	log_.reset();
-	assert (event_queue_.use_count() <= 1);
+	CHECK (event_queue_.use_count() <= 1);
 	event_queue_.reset();
-	assert (rfa_.use_count() <= 1);
+	CHECK (rfa_.use_count() <= 1);
 	rfa_.reset();
 }
 
@@ -967,6 +1049,162 @@ gomi::gomi_t::destroy()
 		" }";
 	LOG(INFO) << "Instance closed.";
 	vpf::AbstractUserPlugin::destroy();
+}
+
+class rfa_dispatcher_t : public rfa::common::DispatchableNotificationClient
+{
+public:
+	rfa_dispatcher_t (std::shared_ptr<void> zmq_context) : zmq_context_ (zmq_context) {}
+	~rfa_dispatcher_t()
+	{
+		Clear();
+		LOG(INFO) << "RFA event dispatcher closed.";
+	}
+
+	int Init (void)
+	{
+		std::function<int(void*)> zmq_close_deleter = zmq_close;
+		CHECK((bool)zmq_context_);
+		event_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PUSH), zmq_close_deleter);
+		CHECK((bool)event_sock_);
+		return zmq_connect (event_sock_.get(), "inproc://gomi/rfa/event");
+	}
+
+	void Clear (void)
+	{
+		CHECK (event_sock_.use_count() <= 1);
+		event_sock_.reset();
+		zmq_context_.reset();
+	}
+
+	void notify (rfa::common::Dispatchable& eventSource, void* closure) override
+	{
+		DCHECK((bool)event_sock_);
+		int rc = zmq_msg_init_size (&msg_, 0);
+		CHECK(0 == rc);
+		rc = zmq_send (event_sock_.get(), &msg_, 0);
+		CHECK(0 == rc);
+		rc = zmq_msg_close (&msg_);
+		CHECK(0 == rc);
+	}
+
+protected:
+	std::shared_ptr<void> zmq_context_;
+	std::shared_ptr<void> event_sock_;
+	zmq_msg_t msg_;
+};
+
+bool
+gomi::event_pump_t::Init (void)
+{
+	std::function<int(void*)> zmq_close_deleter = zmq_close;
+
+/* pull RFA events */
+	event_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PULL), zmq_close_deleter);
+	CHECK((bool)event_sock_);
+	int rc = zmq_bind (event_sock_.get(), "inproc://gomi/rfa/event");
+	CHECK(0 == rc);
+	poll_items_[0].socket = event_sock_.get();
+	poll_items_[0].events = ZMQ_POLLIN;
+
+/* pull RFA responses */
+	poll_items_[1].socket = response_sock_.get();
+	poll_items_[1].events = ZMQ_POLLIN;
+
+/* pull abort event */
+	abort_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PULL), zmq_close_deleter);
+	CHECK((bool)abort_sock_);
+	rc = zmq_connect (abort_sock_.get(), "inproc://gomi/event/abort");
+	CHECK(0 == rc);
+	poll_items_[2].socket = abort_sock_.get();
+	poll_items_[2].events = ZMQ_POLLIN;
+
+	return true;
+}
+
+void
+gomi::event_pump_t::Clear (void)
+{
+/* cleanup 0mq sockets before context. */
+	CHECK (abort_sock_.use_count() <= 1);
+	abort_sock_.reset();
+	CHECK (event_sock_.use_count() <= 1);
+	event_sock_.reset();
+	response_sock_.reset();
+	zmq_context_.reset();
+/* cleanup RFA dependencies */
+	provider_.reset();
+	event_queue_.reset();
+}
+
+void
+gomi::event_pump_t::Run (void)
+{
+	rfa_dispatcher_t dispatcher (zmq_context_);
+	zmq_msg_t msg;
+	rfa::message::RespMsg respmsg (false);
+	rfa::sessionLayer::RequestToken* token;
+	provider::Response response;
+
+/* proxy RFA events through 0mq */
+	int rc = dispatcher.Init();
+	CHECK(0 == rc);
+	event_queue_->registerNotificationClient (dispatcher, nullptr);
+
+	LOG(INFO) << "Entering event pump loop.";
+
+	do {
+		rc = zmq_poll (poll_items_, _countof (poll_items_), -1);
+		if (rc <= 0)
+			continue;
+/* #0 - RFA event */
+		if (0 != (poll_items_[0].revents & ZMQ_POLLIN))
+			event_queue_->dispatch (rfa::common::Dispatchable::NoWait);
+/* #1 - RFA response message */
+		if (0 != (poll_items_[1].revents & ZMQ_POLLIN))
+		{
+			rc = zmq_msg_init (&msg);
+			CHECK(0 == rc);
+			rc = zmq_recv (poll_items_[1].socket, &msg, 0);
+			CHECK(0 == rc);
+			if (!response.ParseFromArray (zmq_msg_data (&msg), static_cast<int> (zmq_msg_size (&msg)))) {
+				LOG(ERROR) << "Received invalid response.";
+				rc = zmq_msg_close (&msg);
+				CHECK(0 == rc);
+				continue;
+			}
+
+			DVLOG(1) << response.DebugString();
+/* token */
+			token = reinterpret_cast<rfa::sessionLayer::RequestToken*> (response.token());
+			try {
+				LOG(INFO) << "Received RFA response message, size: " << response.encoded_buffer().size();
+/* encoded buffer */
+				rfa::common::Buffer buffer (const_cast<unsigned char*> (reinterpret_cast<const unsigned char*> (response.encoded_buffer().c_str())),
+							    static_cast<int> (response.encoded_buffer().size()),
+							    static_cast<int> (response.encoded_buffer().size()),
+							    false);
+				respmsg.setEncodedBuffer (buffer);
+/* forward to RFA */
+				provider_->Submit (&respmsg, token, nullptr);
+				LOG(INFO) << "Response forwarded to RFA.";
+				respmsg.clear();
+			} catch (rfa::common::InvalidUsageException& e) {
+				LOG(ERROR) << "EncodedBuffer::InvalidUsageException: { " <<
+						"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
+						" }";
+			}
+			rc = zmq_msg_close (&msg);
+			CHECK(0 == rc);
+		}
+/* #2 - Abort request */
+	} while (0 == (poll_items_[2].revents & ZMQ_POLLIN));
+
+	LOG(INFO) << "Event pump received interrupt request.";
+
+/* cleanup */
+	event_queue_->unregisterNotificationClient (dispatcher);
+	dispatcher.Clear();
 }
 
 /* eof */

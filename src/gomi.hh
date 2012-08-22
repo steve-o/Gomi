@@ -89,19 +89,36 @@ namespace gomi
 	class event_pump_t
 	{
 	public:
-		event_pump_t (std::shared_ptr<rfa::common::EventQueue> event_queue) :
+		event_pump_t (
+			std::shared_ptr<void> zmq_context,
+			std::shared_ptr<void> response_sock,
+			std::shared_ptr<provider_t> provider,
+			std::shared_ptr<rfa::common::EventQueue> event_queue
+			) :
+			zmq_context_ (zmq_context),
+			response_sock_ (response_sock),
+			provider_ (provider),
 			event_queue_ (event_queue)
 		{
 		}
-
-		void operator()()
+		~event_pump_t()
 		{
-			while (event_queue_->isActive()) {
-				event_queue_->dispatch (rfa::common::Dispatchable::InfiniteWait);
-			}
+			Clear();
+			LOG(INFO) << "Event pump thread closed.";
 		}
 
-	private:
+		bool Init();
+		void Clear();
+		void Run();
+
+	protected:
+		std::shared_ptr<void> zmq_context_;
+		zmq_pollitem_t poll_items_[3];
+		std::shared_ptr<void> abort_sock_;
+		std::shared_ptr<void> event_sock_;
+		std::shared_ptr<void> response_sock_;
+
+		std::shared_ptr<provider_t> provider_;
 		std::shared_ptr<rfa::common::EventQueue> event_queue_;
 	};
 
@@ -133,7 +150,7 @@ namespace gomi
 		static std::list<gomi_t*> global_list_;
 		static boost::shared_mutex global_list_lock_;
 
-	private:
+	protected:
 
 /* Run core event loop. */
 		void MainLoop();
@@ -211,7 +228,11 @@ namespace gomi
 
 /* thread worker shutdown socket. */
 		std::shared_ptr<void> zmq_context_;
-		std::shared_ptr<void> abort_sock_;
+		std::shared_ptr<void> event_pump_abort_sock_;
+		std::shared_ptr<void> worker_abort_sock_;
+
+/* Response socket. */
+		std::shared_ptr<void> response_sock_;
 
 /** Performance Counters. **/
 		boost::posix_time::ptime last_activity_;

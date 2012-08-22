@@ -58,25 +58,7 @@ gomi::provider_t::provider_t (
 
 gomi::provider_t::~provider_t()
 {
-	VLOG(3) << "Unregistering " << clients_.size() << " RFA session clients.";
-	std::for_each (clients_.begin(), clients_.end(),
-		[&](std::pair<rfa::common::Handle*const, std::shared_ptr<client_t>>& client)
-	{
-		CHECK ((bool)client.second);
-		omm_provider_->unregisterClient (client.first);
-		client.second.reset();
-	});
-/* 0mq context */
-	CHECK (sender_.use_count() <= 1);
-	sender_.reset();
-	zmq_context_.reset();
-/* RFA handles */
-	if (nullptr != error_item_handle_)
-		omm_provider_->unregisterClient (error_item_handle_), error_item_handle_ = nullptr;
-	omm_provider_.reset();
-	session_.reset();
-	event_queue_.reset();
-	rfa_.reset();
+	Clear();
 /* Summary output */
 	using namespace boost::posix_time;
 	auto uptime = second_clock::universal_time() - creation_time_;
@@ -88,6 +70,30 @@ gomi::provider_t::~provider_t()
 		", \"ConnectionEvents\": " << cumulative_stats_[PROVIDER_PC_CONNECTION_EVENTS_RECEIVED] <<
 		", \"ClientSessions\": " << cumulative_stats_[PROVIDER_PC_CLIENT_SESSION_ACCEPTED] <<
 		" }";
+	LOG(INFO) << "Provider closed.";
+}
+
+void
+gomi::provider_t::Clear()
+{
+	VLOG(3) << "Unregistering " << clients_.size() << " RFA session clients.";
+	std::for_each (clients_.begin(), clients_.end(), [this](const std::pair<rfa::common::Handle*const, std::shared_ptr<client_t>>& client)
+	{
+		CHECK ((bool)client.second);
+		omm_provider_->unregisterClient (client.first);
+	});
+	clients_.clear();
+/* 0mq context */
+	CHECK (request_sock_.use_count() <= 1);
+	request_sock_.reset();
+	zmq_context_.reset();
+/* RFA handles */
+	if (nullptr != error_item_handle_)
+		omm_provider_->unregisterClient (error_item_handle_), error_item_handle_ = nullptr;
+	omm_provider_.reset();
+	session_.reset();
+	event_queue_.reset();
+	rfa_.reset();
 }
 
 bool
@@ -147,14 +153,14 @@ gomi::provider_t::Init()
 	if (nullptr == error_item_handle_)
 		return false;
 
-/* create new push socket for submitting refresh requests. */
+/* create new push socket for submitting requests. */
 	try {
 		std::function<int(void*)> zmq_close_deleter = zmq_close;
-		sender_.reset (zmq_socket (zmq_context_.get(), ZMQ_PUSH), zmq_close_deleter);
-		CHECK((bool)sender_);
-		int rc = zmq_bind (sender_.get(), "inproc://gomi/refresh");
+		request_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PUSH), zmq_close_deleter);
+		CHECK((bool)request_sock_);
+		int rc = zmq_bind (request_sock_.get(), "inproc://gomi/rfa/request");
 		CHECK(0 == rc);
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "ZeroMQ::Exception: { "
 			"\"What\": \"" << e.what() << "\" }";
 		return false;
@@ -183,72 +189,17 @@ gomi::provider_t::CreateItemStream (
 	return true;
 }
 
-/* Send an Rfa message through the pre-created item stream.
- */
-
-bool
-gomi::provider_t::Send (
-	item_stream_t& stream,
-	rfa::message::RespMsg& msg,
-	const rfa::message::AttribInfo& attribInfo
-)
-{
-	unsigned i = 0;
-	boost::shared_lock<boost::shared_mutex> stream_lock (stream.lock);
-	const auto now = boost::posix_time::second_clock::universal_time();
-
-	{
-/* first iteration without AttribInfo */
-		std::for_each (stream.requests.begin(), stream.requests.end(),
-			[&](std::pair<rfa::sessionLayer::RequestToken*const, std::shared_ptr<request_t>>& request)
-		{
-			if (!request.second->has_initial_image.load() || request.second->use_attribinfo_in_updates)
-				return;
-			DCHECK(request.second->is_streaming);
-			Submit (static_cast<rfa::common::Msg&> (msg), *(request.first), nullptr);
-			auto client = request.second->client.lock();
-			if ((bool)client) {
-				client->cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT]++;
-				client->last_activity_ = now;
-			}
-			++i;
-		});
-	}
-	if (i < stream.requests.size())
-	{
-/* second iteration with AttribInfo */
-		msg.setAttribInfo (attribInfo);
-		std::for_each (stream.requests.begin(), stream.requests.end(),
-		[&](std::pair<rfa::sessionLayer::RequestToken*const, std::shared_ptr<request_t>>& request)
-		{
-			if (!request.second->has_initial_image.load() || !request.second->use_attribinfo_in_updates)
-				return;
-			DCHECK(request.second->is_streaming);
-			Submit (static_cast<rfa::common::Msg&> (msg), *(request.first), nullptr);
-			auto client = request.second->client.lock();
-			if ((bool)client) {
-				client->cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT]++;
-				client->last_activity_ = now;
-			}
-			++i;
-		});
-	}
-	cumulative_stats_[PROVIDER_PC_MSGS_SENT]++;
-	last_activity_ = now;
-	return true;
-}
-
 /* Send an Rfa initial image to a single client.
  */
 bool
 gomi::provider_t::SendReply (
-	rfa::message::RespMsg& msg,
-	rfa::sessionLayer::RequestToken& token
+	rfa::message::RespMsg*const msg,
+	rfa::sessionLayer::RequestToken*const token
 	)
 {
 /* find request and iteam stream for the token */
 	boost::upgrade_lock<boost::shared_mutex> requests_lock (requests_lock_);
-	auto it = requests_.find (&token);
+	auto it = requests_.find (token);
 	if (requests_.end() == it)
 		return false;
 	auto request = it->second.lock();	// weak_ptr for request_t
@@ -263,7 +214,7 @@ gomi::provider_t::SendReply (
 /* lock updates for this stream */
 	boost::upgrade_lock<boost::shared_mutex> stream_lock (stream->lock);
 /* forward refresh image */
-	Submit (static_cast<rfa::common::Msg&> (msg), token, nullptr);
+	Submit (msg, token, nullptr);
 	cumulative_stats_[PROVIDER_PC_MSGS_SENT]++;
 	client->cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT]++;
 	client->last_activity_ = last_activity_ = boost::posix_time::second_clock::universal_time();
@@ -278,7 +229,7 @@ gomi::provider_t::SendReply (
 		boost::upgrade_to_unique_lock<boost::shared_mutex> unique_requests_lock (requests_lock);
 		requests_.erase (it);
 /* from items watchlist */
-		auto stream_it = stream->requests.find (&token);
+		auto stream_it = stream->requests.find (token);
 		DCHECK (stream_it != stream->requests.end());
 		boost::upgrade_to_unique_lock<boost::shared_mutex> unique_stream_lock (stream_lock);
 		stream->requests.erase (stream_it);
@@ -292,15 +243,15 @@ gomi::provider_t::SendReply (
  */
 uint32_t
 gomi::provider_t::Submit (
-	rfa::common::Msg& msg,
-	rfa::sessionLayer::RequestToken& token,
+	rfa::message::RespMsg*const msg,
+	rfa::sessionLayer::RequestToken*const token,
 	void* closure
 	)
 {
 	rfa::sessionLayer::OMMSolicitedItemCmd itemCmd;
-	itemCmd.setMsg (msg);
+	itemCmd.setMsg (*msg);
 /* 7.5.9.7 Set the unique item identifier. */
-	itemCmd.setRequestToken (token);
+	itemCmd.setRequestToken (*token);
 /* 7.5.9.8 Write the response message directly out to the network through the
  * connection.
  */
@@ -401,7 +352,7 @@ gomi::provider_t::AcceptClientSession (
 {
 	VLOG(2) << "Accepting new client session request.";
 
-	auto client = std::make_shared<client_t> (*this, handle);
+	auto client = std::make_shared<client_t> (shared_from_this(), handle);
 	if (!(bool)client)
 		return false;
 

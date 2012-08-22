@@ -112,7 +112,10 @@ gomi::gomi_t::execute (
 /* FlexRecord exceptions */
 	catch (const vpf::PluginFrameworkException& e) {
 		/* yay broken Tcl API */
-		Tcl_SetResult (interp, (char*)e.what(), TCL_VOLATILE);
+		Tcl_SetResult (interp, const_cast<char*> (e.what()), TCL_VOLATILE);
+	}
+	catch (const std::exception& e) {
+		Tcl_SetResult (interp, const_cast<char*> (e.what()), TCL_VOLATILE);
 	}
 	catch (...) {
 		Tcl_SetResult (interp, "Unhandled exception", TCL_STATIC);

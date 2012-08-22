@@ -80,7 +80,7 @@ namespace gomi
 		boost::noncopyable
 	{
 	public:
-		client_t (provider_t& provider, const rfa::common::Handle* handle);
+		client_t (std::shared_ptr<provider_t> provider, const rfa::common::Handle* handle);
 		~client_t();
 
 		bool GetAssociatedMetaInfo();
@@ -89,6 +89,8 @@ namespace gomi
 		void processEvent (const rfa::common::Event& event) override;
 
 		bool Init (rfa::common::Handle*const handle);
+		void Clear (void);
+
 		rfa::common::Handle*const GetHandle() const {
 			return handle_;
 		}
@@ -101,11 +103,11 @@ namespace gomi
 
 	private:
 		void OnOMMSolicitedItemEvent (const rfa::sessionLayer::OMMSolicitedItemEvent& event);
-		void OnReqMsg (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken& token);
-		void OnLoginRequest (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken& token);
-		void OnDirectoryRequest (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken& token);
-		void OnDictionaryRequest (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken& token);
-		void OnItemRequest (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken& token);
+		void OnReqMsg (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken*const token);
+		void OnLoginRequest (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken*const token);
+		void OnDirectoryRequest (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken*const token);
+		void OnDictionaryRequest (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken*const token);
+		void OnItemRequest (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken*const token);
 		void OnOMMItemEvent (const rfa::sessionLayer::OMMItemEvent& event);
                 void OnRespMsg (const rfa::message::RespMsg& msg);
                 void OnLoginResponse (const rfa::message::RespMsg& msg);
@@ -114,14 +116,14 @@ namespace gomi
                 void OnLoginClosed (const rfa::message::RespMsg& msg);
 		void OnOMMInactiveClientSessionEvent (const rfa::sessionLayer::OMMInactiveClientSessionEvent& event);
 
-		bool RejectLogin (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken& login_token);
-		bool AcceptLogin (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken& login_token);
-		bool SendDirectoryResponse (rfa::sessionLayer::RequestToken& token, const char* service_name, uint32_t filter_mask);
-		bool SendClose (rfa::sessionLayer::RequestToken& token, uint32_t service_id, uint8_t model_type, const char* name, bool use_attribinfo_in_updates, uint8_t status_code);
+		bool RejectLogin (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken*const login_token);
+		bool AcceptLogin (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken*const login_token);
+		bool SendDirectoryResponse (rfa::sessionLayer::RequestToken*consttoken, const char* service_name, uint32_t filter_mask);
+		bool SendClose (rfa::sessionLayer::RequestToken*const token, uint32_t service_id, uint8_t model_type, const char* name, bool use_attribinfo_in_updates, uint8_t status_code);
 
-		uint32_t Submit (rfa::message::RespMsg& msg, rfa::sessionLayer::RequestToken& token, void* closure) throw (rfa::common::InvalidUsageException);
+		uint32_t Submit (rfa::message::RespMsg*const msg, rfa::sessionLayer::RequestToken*const token, void* closure) throw (rfa::common::InvalidUsageException);
 
-		provider_t& provider_;
+		std::shared_ptr<provider_t> provider_;
 
 /* unique id per connection. */
 		std::string prefix_;
