@@ -5,6 +5,7 @@
 #include "gomi_bar.hh"
 
 #include "chromium/logging.hh"
+#include "chromium/metrics/histogram.hh"
 #include "business_day_iterator.hh"
 
 /* FlexRecord Trade identifier. */
@@ -85,6 +86,9 @@ gomi::bin_t::Calculate (
 	FlexRecViewElement* view_element
 	)
 {
+	using namespace boost::chrono;
+	using namespace boost::local_time;
+
 	DLOG(INFO) << "Calculate (date: " << to_simple_string (date) << ")";
 
 /* reset state */
@@ -97,7 +101,6 @@ gomi::bin_t::Calculate (
 	}
 
 /* do not assume today is a business day */
-	using namespace boost::local_time;
 	auto start_date (date);
 	while (!is_business_day (start_date))
 		start_date -= boost::gregorian::date_duration (1);
@@ -107,17 +110,20 @@ gomi::bin_t::Calculate (
 	CHECK (!close_ldt.is_not_a_date_time());
 	close_time_ = close_ldt.utc_time();
 
+	auto checkpoint = high_resolution_clock::now();
 	for (unsigned t = 0; t < bin_decl_.bin_day_count; ++t, --bd_itr)
 	{
 		const auto tp = to_time_period (bin_decl_, *bd_itr);
 
 		bars_[t].Clear();
 		bars_[t].SetTimePeriod (tp);
-#if 0
+		auto checkpoint = high_resolution_clock::now();
+#ifdef USE_FLEXRECORD_CURSOR_API
 		bars_[t].Calculate (symbol_name_.c_str());
 #else
 		bars_[t].Calculate (handle_, work_area, view_element);
 #endif
+		HISTOGRAM_TIMES("Bar.Calculate", high_resolution_clock::now() - checkpoint);
 		VLOG(3) << "bar: { "
 			  "symbol: \"" << symbol_name_ << "\""
 			", day: " << t <<
@@ -188,6 +194,7 @@ gomi::bin_t::Calculate (
 		average_nonzero_volume_ = accumulated_volume / trading_day_count_;
 	}
 
+	HISTOGRAM_TIMES("Bin.Calculate", high_resolution_clock::now() - checkpoint);
 	VLOG(2) << "Calculate() complete,"
 		" day_count=" << trading_day_count_ <<
 		" acvol=" << accumulated_volume << 

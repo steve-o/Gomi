@@ -13,6 +13,19 @@
 
 #include "string_piece.hh"  // For implicit conversions.
 
+namespace chromium {
+
+// Wrapper for vsnprintf that always null-terminates and always returns the
+// number of characters that would be in an untruncated formatted
+// string, even when truncation occurs.
+int vsnprintf(char* buffer, size_t size, const char* format, va_list arguments);
+
+}  // namespace chromium
+
+#if defined(_WIN32)
+#include "string_util_win.hh"
+#endif
+
 // Safe standard library wrappers for all platforms.
 
 extern const char kWhitespaceASCII[];

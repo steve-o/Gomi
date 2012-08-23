@@ -41,6 +41,11 @@
 #include "provider.hh"
 #include "gomi_bin.hh"
 
+namespace chromium
+{
+	class StatisticsRecorder;
+}
+
 namespace logging
 {
 	class LogEventProvider;
@@ -242,6 +247,8 @@ namespace gomi
 		uint32_t cumulative_stats_[GOMI_PC_MAX];
 		uint32_t snap_stats_[GOMI_PC_MAX];
 		boost::posix_time::ptime snap_time_;
+
+		std::unique_ptr<chromium::StatisticsRecorder> recorder_;
 	};
 
 } /* namespace gomi */

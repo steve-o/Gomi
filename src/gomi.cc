@@ -16,8 +16,11 @@
 /* ZeroMQ messaging middleware. */
 #include <zmq.h>
 
+#include "chromium/chromium_switches.hh"
+#include "chromium/command_line.hh"
 #include "chromium/file_util.hh"
 #include "chromium/logging.hh"
+#include "chromium/metrics/histogram.hh"
 #include "chromium/string_split.hh"
 #include "googleurl/url_parse.h"
 #include "business_day_iterator.hh"
@@ -317,7 +320,7 @@ protected:
 
 		rc = zmq_msg_init (&msg_);
 		CHECK(0 == rc);
-		VLOG(1) << prefix_ << "Awaiting new job.";
+		DVLOG(1) << prefix_ << "Awaiting new job.";
 		rc = zmq_recv (request_sock_.get(), &msg_, 0);
 		CHECK(0 == rc);
 		if (!request->ParseFromArray (zmq_msg_data (&msg_), (int)zmq_msg_size (&msg_))) {
@@ -341,7 +344,10 @@ protected:
 		uint8_t rwf_minor_version
 		)
 	{
+		using namespace boost::chrono;
+		auto checkpoint = high_resolution_clock::now();
 		OnBinRequest (request_token, service_id, model_type, item_name, rwf_major_version, rwf_minor_version);
+		HISTOGRAM_TIMES("Worker.OnRequest", high_resolution_clock::now() - checkpoint);
 	}
 
 	void OnBinRequest (
@@ -694,6 +700,13 @@ gomi::gomi_t::gomi_t()
 
 	boost::unique_lock<boost::shared_mutex> (global_list_lock_);
 	global_list_.push_back (this);
+
+	const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+/* Histogram dumping */
+	if (command_line.HasSwitch (switches::kDumpHistogramsOnExit)) {
+		recorder_.reset (new chromium::StatisticsRecorder());
+		chromium::StatisticsRecorder::set_dump_on_exit (true);
+	}
 }
 
 gomi::gomi_t::~gomi_t()
@@ -1174,11 +1187,11 @@ gomi::event_pump_t::Run (void)
 				continue;
 			}
 
-			DVLOG(1) << response.DebugString();
+			DVLOG(2) << response.DebugString();
 /* token */
 			token = reinterpret_cast<rfa::sessionLayer::RequestToken*> (response.token());
 			try {
-				LOG(INFO) << "Received RFA response message, size: " << response.encoded_buffer().size();
+				DVLOG(1) << "Received RFA response message, size: " << response.encoded_buffer().size();
 /* encoded buffer */
 				rfa::common::Buffer buffer (const_cast<unsigned char*> (reinterpret_cast<const unsigned char*> (response.encoded_buffer().c_str())),
 							    static_cast<int> (response.encoded_buffer().size()),
@@ -1186,8 +1199,11 @@ gomi::event_pump_t::Run (void)
 							    false);
 				respmsg.setEncodedBuffer (buffer);
 /* forward to RFA */
+				using namespace boost::chrono;
+				auto checkpoint = high_resolution_clock::now();
 				provider_->Submit (&respmsg, token, nullptr);
-				LOG(INFO) << "Response forwarded to RFA.";
+				HISTOGRAM_TIMES("Provider.Submit", high_resolution_clock::now() - checkpoint);
+				DVLOG(1) << "Response forwarded to RFA.";
 				respmsg.clear();
 			} catch (rfa::common::InvalidUsageException& e) {
 				LOG(ERROR) << "EncodedBuffer::InvalidUsageException: { " <<

@@ -6,8 +6,17 @@
 
 namespace switches {
 
+// Dump any accumualted histograms to the log when browser terminates (requires
+// logging to be enabled to really do anything).  Used by developers and test
+// scripts.
+const char kDumpHistogramsOnExit[]          = "dump-histograms-on-exit";
+
 // Enable DCHECKs in release mode.
 const char kEnableDCHECK[]                  = "enable-dcheck";
+
+// Force logging to be enabled.  Logging is disabled by default in release
+// builds.
+const char kEnableLogging[]                 = "enable-logging";
 
 // Gives the default maximal active V-logging level; 0 is the default.
 // Normally positive values are used for V-logging levels.

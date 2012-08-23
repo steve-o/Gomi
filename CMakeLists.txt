@@ -8,7 +8,7 @@ project (Gomi)
 
 set(GOMI_VERSION_MAJOR 2)
 set(GOMI_VERSION_MINOR 1)
-set(GOMI_VERSION_BUILD 12)
+set(GOMI_VERSION_BUILD 13)
 
 # Net-SNMP SDK installed, tested 5.7.1.
 set(NETSNMP_ROOT D:/net-snmp-5.7.1)
@@ -218,10 +218,14 @@ set(cxx-sources
 	src/chromium/file_util.cc
 	src/chromium/file_util_win.cc
 	src/chromium/memory/singleton.cc
+	src/chromium/metrics/histogram.cc
+#	src/chromium/metrics/stats_counters.cc
+#	src/chromium/metrics/stats_table.cc
 	src/chromium/logging.cc
 	src/chromium/string_piece.cc
 	src/chromium/string_split.cc
 	src/chromium/string_util.cc
+	src/chromium/stringprintf.cc
 	src/chromium/synchronization/lock.cc
 	src/chromium/synchronization/lock_impl_win.cc
 	src/chromium/vlog.cc
