@@ -22,6 +22,7 @@
 #include "chromium/logging.hh"
 #include "chromium/metrics/histogram.hh"
 #include "chromium/metrics/stats_table.hh"
+#include "chromium/string_piece.hh"
 #include "chromium/string_split.hh"
 #include "googleurl/url_parse.h"
 #include "business_day_iterator.hh"
@@ -437,46 +438,33 @@ protected:
 		DCHECK(file_name_.is_valid());
 		item_name->assign (url_.c_str() + file_name_.begin, file_name_.len);
 
-		if (parsed_.query.is_valid()) {
+		if (parsed_.query.is_valid())
+		{
 			url_parse::Component query = parsed_.query;
-			url_parse::Component key, value;
-			while (url_parse::ExtractQueryKeyValue (url_.c_str(), &query, &key, &value)) {
-				if (key.len == strlen (kOpen) && !strncmp (url_.c_str() + key.begin, kOpen, key.len))
-				{
-					std::stringstream ss (std::string (url_.c_str() + value.begin, value.len));
-					boost::posix_time::time_duration td;
-					if (ss >> td)
-						bin_decl->bin_start = td;
-				}
-				else if (key.len == strlen (kClose) && !strncmp (url_.c_str() + key.begin, kClose, key.len))
-				{
-					std::stringstream ss (std::string (url_.c_str() + value.begin, value.len));
-					boost::posix_time::time_duration td;
-					if (ss >> td)
-						bin_decl->bin_end = td;
-				}
-				else if (key.len == strlen (kTimezone) && !strncmp (url_.c_str() + key.begin, kTimezone, key.len))
-				{
-					const std::string value (url_.c_str() + value.begin, value.len);					
-					boost::local_time::time_zone_ptr tz = tzdb_.time_zone_from_region (value);
-					if (nullptr != tz)
-						bin_decl->bin_tz = tz;
-				}
-				else if (key.len == strlen (kOffset) && !strncmp (url_.c_str() + key.begin, kOffset, key.len))
-				{
-					const std::string value (url_.c_str() + value.begin, value.len);
-					unsigned offset = (unsigned)std::atol (value.c_str());
-/* cap request */
+			url_parse::Component key_range, value_range;
+			std::istringstream iss;
+			boost::posix_time::time_duration td;
+			while (url_parse::ExtractQueryKeyValue (url_.c_str(), &query, &key_range, &value_range))
+			{
+				const chromium::StringPiece key (url_.c_str() + key_range.begin, key_range.len);
+				const std::string value (url_.c_str() + value_range.begin, value_range.len);
+				if (key == kOpen) {
+					iss.str (value);				
+					if (iss >> td) bin_decl->bin_start = td;
+				} else if (key == kClose) {
+					iss.str (value);
+					if (iss >> td) bin_decl->bin_end = td;
+				} else if (key == kOffset) {
+					const unsigned offset = (unsigned)std::atol (value.c_str());
 					*day_offset = (offset < kMaximumDayOffset) ? offset : kMaximumDayOffset;
-				}
-				else if (key.len == strlen (kDays) && !strncmp (url_.c_str() + key.begin, kDays, key.len))
-				{
-					const std::string value (url_.c_str() + value.begin, value.len);
-					unsigned count = (unsigned)std::atol (value.c_str());
-/* cap request */
+				} else if (key == kDays) {
+					const unsigned count = (unsigned)std::atol (value.c_str());
 					bin_decl->bin_day_count = (count < kMaximumDayCount) ? count : kMaximumDayCount;
+				} else if (key == kTimezone ) {
+					const boost::local_time::time_zone_ptr tzptr = tzdb_.time_zone_from_region (value);
+					if (nullptr != tzptr) bin_decl->bin_tz = tzptr;
 				}
-			}
+ 			}
 		}
 	}
 
