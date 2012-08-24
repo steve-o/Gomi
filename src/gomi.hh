@@ -44,6 +44,7 @@
 namespace chromium
 {
 	class StatisticsRecorder;
+	class StatsTable;
 }
 
 namespace logging
@@ -61,7 +62,7 @@ namespace gomi
 /* Performance Counters */
 	enum {
 		GOMI_PC_TCL_QUERY_RECEIVED,
-		GOMI_PC_TIMER_QUERY_RECEIVED,
+		GOMI_PC_TIMER_QUERY_RECEIVED,		/* unused: legacy metric */
 /*		GOMI_PC_LAST_ACTIVITY,*/
 /*		GOMI_PC_TCL_SVC_TIME_MIN,*/
 /*		GOMI_PC_TCL_SVC_TIME_MEAN,*/
@@ -249,6 +250,7 @@ namespace gomi
 		boost::posix_time::ptime snap_time_;
 
 		std::unique_ptr<chromium::StatisticsRecorder> recorder_;
+		chromium::StatsTable* statstable_;
 	};
 
 } /* namespace gomi */

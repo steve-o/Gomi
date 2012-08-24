@@ -21,6 +21,7 @@
 #include "chromium/file_util.hh"
 #include "chromium/logging.hh"
 #include "chromium/metrics/histogram.hh"
+#include "chromium/metrics/stats_table.hh"
 #include "chromium/string_split.hh"
 #include "googleurl/url_parse.h"
 #include "business_day_iterator.hh"
@@ -39,7 +40,7 @@
  */
 static const int kDictionaryId = 1;
 
-/* RDM: Absolutely no idea. */
+/* RDM: NASD_BIDASK record template as defacto default */
 static const int kFieldListId = 3;
 
 /* RDM FIDs. */
@@ -71,6 +72,10 @@ LONG volatile gomi::gomi_t::instance_count_ = 0;
 
 std::list<gomi::gomi_t*> gomi::gomi_t::global_list_;
 boost::shared_mutex gomi::gomi_t::global_list_lock_;
+
+static const char* kStatsFileName = "gomi.stats";
+static int kStatsFileThreads = 20;
+static int kStatsFileCounters = 200;
 
 using rfa::common::RFA_String;
 
@@ -707,6 +712,12 @@ gomi::gomi_t::gomi_t()
 		recorder_.reset (new chromium::StatisticsRecorder());
 		chromium::StatisticsRecorder::set_dump_on_exit (true);
 	}
+
+#ifdef USE_STATS_TABLE
+// Load and initialize the stats table.  No unique name - instances share table.
+	statstable_ = new chromium::StatsTable(kStatsFileName, kStatsFileThreads, kStatsFileCounters);
+	chromium::StatsTable::set_current (statstable_);
+#endif
 }
 
 gomi::gomi_t::~gomi_t()
@@ -716,6 +727,13 @@ gomi::gomi_t::~gomi_t()
 	global_list_.remove (this);
 
 	Clear();
+
+#ifdef USE_STATS_TABLE
+// Tear down the shared StatsTable.
+	chromium::StatsTable::set_current (nullptr);
+	delete statstable_;
+	statstable_ = nullptr;
+#endif
 }
 
 /* is bin not a 10-minute time period, i.e. a realtime component.
