@@ -165,6 +165,7 @@ namespace gomi
 		bool UnregisterTclApi (const char* id);
 		int TclGomiQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 		int TclFeedLogQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
+		int TclHistogramDump (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 
 		bool IsSpecialBin (const bin_decl_t& bin) const;
 

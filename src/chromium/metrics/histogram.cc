@@ -886,10 +886,10 @@ StatisticsRecorder::StatisticsRecorder() {
 StatisticsRecorder::~StatisticsRecorder() {
   DCHECK(histograms_ && lock_);
 
-  if (dump_on_exit_) {
+  if (DLOG_IS_ON(INFO) && dump_on_exit_) {
     std::string output;
     WriteGraph("", &output);
-    LOG(INFO) << output;
+    DLOG(INFO) << output;
   }
   // Clean up.
   HistogramMap* histograms = NULL;

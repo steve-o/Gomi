@@ -12,6 +12,7 @@
 
 #include "chromium/file_util.hh"
 #include "chromium/logging.hh"
+#include "chromium/metrics/histogram.hh"
 #include "microsoft/unique_handle.hh"
 #include "error.hh"
 #include "rfaostream.hh"
@@ -22,16 +23,18 @@
 static const char* kGomiFlexRecordName = "Gomi";
 
 /* Default FlexRecord fields. */
-static const char* kDefaultLastPriceField = "LastPrice";
+static const char* kDefaultLastPriceField  = "LastPrice";
 static const char* kDefaultTickVolumeField = "TickVolume";
 
 /* Tcl exported API. */
-static const char* kBasicFunctionName = "gomi_query";
-static const char* kFeedLogFunctionName = "gomi_feedlog";
+static const char* kBasicApi     = "gomi_query";
+static const char* kFeedLogApi   = "gomi_feedlog";
+static const char* kHistogramApi = "gomi_histogram";
 
 static const char* kTclApi[] = {
-	kBasicFunctionName,
-	kFeedLogFunctionName
+	kBasicApi,
+	kFeedLogApi,
+	kHistogramApi
 };
 
 /* Register Tcl API.
@@ -102,10 +105,12 @@ gomi::gomi_t::execute (
 
 	try {
 		const char* command = cmdInfo.getCommandName();
-		if (0 == strcmp (command, kBasicFunctionName))
+		if (0 == strcmp (command, kBasicApi))
 			retval = TclGomiQuery (cmdInfo, cmdData);
-		else if (0 == strcmp (command, kFeedLogFunctionName))
+		else if (0 == strcmp (command, kFeedLogApi))
 			retval = TclFeedLogQuery (cmdInfo, cmdData);
+		else if (0 == strcmp (command, kHistogramApi))
+			retval = TclHistogramDump (cmdInfo, cmdData);
 		else
 			Tcl_SetResult (interp, "unknown function", TCL_STATIC);
 	}
@@ -483,6 +488,25 @@ gomi::gomi_t::TclFeedLogQuery (
 			LOG(WARNING) << "Writing file " << feedlog_file << " failed, error code=" << GetLastError();
 		}
 	});
+	return TCL_OK;
+}
+
+int
+gomi::gomi_t::TclHistogramDump (
+	const vpf::CommandInfo& cmdInfo,
+	vpf::TCLCommandData& cmdData
+	)
+{
+	TCLLibPtrs* tclStubsPtr = (TCLLibPtrs*)cmdData.mClientData;
+	Tcl_Interp* interp = cmdData.mInterp;		/* Current interpreter. */
+	std::string output;
+
+	if ((bool)recorder_)
+		recorder_->WriteGraph ("", &output);
+
+	Tcl_Obj* resultPtr = Tcl_NewStringObj (output.c_str(), output.size());
+	Tcl_SetObjResult (interp, resultPtr);
+
 	return TCL_OK;
 }
 

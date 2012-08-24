@@ -706,11 +706,14 @@ gomi::gomi_t::gomi_t()
 	boost::unique_lock<boost::shared_mutex> (global_list_lock_);
 	global_list_.push_back (this);
 
-	const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-/* Histogram dumping */
-	if (command_line.HasSwitch (switches::kDumpHistogramsOnExit)) {
+	if (0 == instance_) {
+/* Histogram singleton */
 		recorder_.reset (new chromium::StatisticsRecorder());
-		chromium::StatisticsRecorder::set_dump_on_exit (true);
+
+		const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+/* Histogram debug log dump */
+		if (command_line.HasSwitch (switches::kDumpHistogramsOnExit))
+			chromium::StatisticsRecorder::set_dump_on_exit (true);
 	}
 
 #ifdef USE_STATS_TABLE
