@@ -113,7 +113,7 @@ initialize_table_gomiPluginTable(void)
 {
 	DLOG(INFO) << "initialize_table_gomiPluginTable()";
 
-	static const oid gomiPluginTable_oid[] = {1,3,6,1,4,1,67,1,1,2};
+	static const oid gomiPluginTable_oid[] = {1,3,6,1,4,1,67,3,2,2};
 	const size_t gomiPluginTable_oid_len = OID_LENGTH (gomiPluginTable_oid);
 	netsnmp_handler_registration* reg = nullptr;
 	netsnmp_iterator_info* iinfo = nullptr;
@@ -132,10 +132,10 @@ initialize_table_gomiPluginTable(void)
 		goto error;
 	netsnmp_table_helper_add_indexes (table_info,
 					  ASN_OCTET_STR,  /* index: gomiPluginId */
-					  ASN_UNSIGNED,  /* index: gomiPluginInstance */
+					  ASN_UNSIGNED,  /* index: gomiPluginUniqueInstance */
 					  0);
 	table_info->min_column = COLUMN_GOMIPLUGINWINDOWSREGISTRYKEY;
-	table_info->max_column = COLUMN_GOMIPLUGINRICSUFFIX;
+	table_info->max_column = COLUMN_GOMIPLUGINDEFAULTDAYCOUNT;
     
 	iinfo = SNMP_MALLOC_TYPEDEF (netsnmp_iterator_info);
 	if (nullptr == iinfo)
@@ -220,7 +220,7 @@ gomiPluginTable_get_next_data_point (
 	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)gomi->plugin_id_.c_str(), gomi->plugin_id_.length());
         idx = idx->next_variable;
 
-/* gomiPluginInstance */
+/* gomiPluginUniqueInstance */
 	const unsigned instance = gomi->instance_;
 	snmp_set_var_typed_value (idx, ASN_UNSIGNED, (const u_char*)&instance, sizeof (instance));
 
@@ -318,24 +318,53 @@ gomiPluginTable_handler (
 					(const u_char*)gomi->config_.vendor_name.c_str(), gomi->config_.vendor_name.length());
 				break;
 
-			case COLUMN_GOMIPLUGINPUBLISHIVL:
-				snmp_set_var_typed_value (var, ASN_OCTET_STR,
-					(const u_char*)gomi->config_.interval.c_str(), gomi->config_.interval.length());
+			case COLUMN_GOMIPLUGINMAXIMUMDATASIZE:
+				{
+					const unsigned maximum_data_size = (unsigned)gomi->config_.maximum_data_size;
+					snmp_set_var_typed_value (var, ASN_UNSIGNED,
+						(const u_char*)maximum_data_size, sizeof (maximum_data_size));
+				}
 				break;
 
-			case COLUMN_GOMIPLUGINTOLERABLEDELAY:
-				snmp_set_var_typed_value (var, ASN_OCTET_STR,
-					(const u_char*)gomi->config_.tolerable_delay.c_str(), gomi->config_.tolerable_delay.length());
+			case COLUMN_GOMIPLUGINSESSIONCAPACITY:
+				{
+					const unsigned session_capacity = (unsigned)gomi->config_.session_capacity;
+					snmp_set_var_typed_value (var, ASN_UNSIGNED,
+						(const u_char*)session_capacity, sizeof (session_capacity));
+				}
 				break;
 
-// obsolete
-			case COLUMN_GOMIPLUGINRESETTIME:
-				snmp_set_var_typed_value (var, ASN_OCTET_STR, (const u_char*)nullptr, 0);
+			case COLUMN_GOMIPLUGINWORKERCOUNT:
+				{
+					const unsigned worker_count = (unsigned)gomi->config_.worker_count;
+					snmp_set_var_typed_value (var, ASN_UNSIGNED,
+						(const u_char*)worker_count, sizeof (worker_count));
+				}
 				break;
 
 			case COLUMN_GOMIPLUGINRICSUFFIX:
 				snmp_set_var_typed_value (var, ASN_OCTET_STR,
 					(const u_char*)gomi->config_.suffix.c_str(), gomi->config_.suffix.length());
+				break;
+
+			case COLUMN_GOMIPLUGINSYMBOLMAP:
+				snmp_set_var_typed_value (var, ASN_OCTET_STR,
+					(const u_char*)gomi->config_.symbolmap.c_str(), gomi->config_.symbolmap.length());
+				break;
+
+			case COLUMN_GOMIPLUGINDEFAULTTIMEZONE:
+				snmp_set_var_typed_value (var, ASN_OCTET_STR,
+					(const u_char*)gomi->config_.tz.c_str(), gomi->config_.tz.length());
+				break;
+
+			case COLUMN_GOMIPLUGINTIMEZONEDATABASE:
+				snmp_set_var_typed_value (var, ASN_OCTET_STR,
+					(const u_char*)gomi->config_.tzdb.c_str(), gomi->config_.tzdb.length());
+				break;
+
+			case COLUMN_GOMIPLUGINDEFAULTDAYCOUNT:
+				snmp_set_var_typed_value (var, ASN_OCTET_STR,
+					(const u_char*)gomi->config_.day_count.c_str(), gomi->config_.day_count.length());
 				break;
 
 			default:
@@ -361,7 +390,7 @@ initialize_table_gomiPluginPerformanceTable(void)
 {
 	DLOG(INFO) << "initialize_table_gomiPluginPerformanceTable()";
 
-	static const oid gomiPluginPerformanceTable_oid[] = {1,3,6,1,4,1,67,1,1,4};
+	static const oid gomiPluginPerformanceTable_oid[] = {1,3,6,1,4,1,67,3,2,4};
 	const size_t gomiPluginPerformanceTable_oid_len = OID_LENGTH(gomiPluginPerformanceTable_oid);
 	netsnmp_handler_registration* reg = nullptr;
 	netsnmp_iterator_info* iinfo = nullptr;
