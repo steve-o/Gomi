@@ -378,13 +378,12 @@ protected:
 		const RFA_String stream_name (stream_name_c, 0, false);
 
 /* decompose request */
-		std::string item_name;
 		bin_decl_t bin_decl;
 		unsigned day_offset = 0;
 
 		bin_decl.bin_tz = TZ_;
 		bin_decl.bin_day_count = std::stoi (config_.day_count);
-		ParseRIC (stream_name_c, strlen (stream_name_c), &item_name, &bin_decl, &day_offset);
+		ParseRIC (stream_name_c, strlen (stream_name_c), &item_name_, &bin_decl, &day_offset);
 
 /* start of bin */
 		using namespace boost::local_time;
@@ -401,7 +400,7 @@ protected:
 		}
 
 /* TREP-VA cached symbol handle */
-		auto directory_it = directory_.find (item_name);
+		auto directory_it = directory_.find (item_name_);
 		DCHECK(directory_.end() != directory_it);
 
 /* run analytic on bin and send result */
@@ -422,6 +421,17 @@ protected:
 		VLOG(2) << prefix_ << "Request complete.";
 	}
 
+/* Decompose RIC of the form:
+ *
+ * /VTA/MSFT.O?open=10:00:00&close=10:10:00&days=20&offset=1&tz=EST
+ *
+ * item_name              = MSFT.O     // underlying symbol
+ * bin_decl.bin_start     = 10:00:00   // bar open time
+ * bin_decl.bin_end       = 10:10:00   // bar close time
+ * bin_decl.bin_day_count = 20         // length of bin in days
+ * bin_decl.bin_tz        = EST        // time zone of bar times
+ * day_offset             = 1          // business day offset to today
+ */
 	void ParseRIC (
 		const char* ric,
 		size_t ric_len,
@@ -430,38 +440,58 @@ protected:
 		unsigned* day_offset
 		)
 	{
+/* std::string for convenience of appending, store fixed on heap inside object,
+ * The URL prefix is required to capture standard behaviour of the URL parsing library.
+ */
 		url_.assign ("vta://localhost");
 		url_.append (ric, ric_len);
+/* Pass through Google URL http://code.google.com/p/google-url/
+ */
 		url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed_);
 		DCHECK(parsed_.path.is_valid());
+/* URL file name becomes the underlying symbol
+ */
 		url_parse::ExtractFileName (url_.c_str(), parsed_.path, &file_name_);
 		DCHECK(file_name_.is_valid());
 		item_name->assign (url_.c_str() + file_name_.begin, file_name_.len);
 
+/* If a query parameter was found, i.e. ?x suffix
+ */
 		if (parsed_.query.is_valid())
 		{
 			url_parse::Component query = parsed_.query;
-			url_parse::Component key_range, value_range;
-			std::istringstream iss;
+			url_parse::Component key_range, value_range;			
 			boost::posix_time::time_duration td;
+/* For each key-value pair, i.e. ?a=x&b=y&c=z -> (a,x) (b,y) (c,z)
+ */
 			while (url_parse::ExtractQueryKeyValue (url_.c_str(), &query, &key_range, &value_range))
 			{
+/* Lazy std::string conversion for key
+ */
 				const chromium::StringPiece key (url_.c_str() + key_range.begin, key_range.len);
-				const std::string value (url_.c_str() + value_range.begin, value_range.len);
+/* Value must convert to add NULL terminator for conversion APIs.
+ */
+				value_.assign (url_.c_str() + value_range.begin, value_range.len);
 				if (key == kOpen) {
-					iss.str (value);				
-					if (iss >> td) bin_decl->bin_start = td;
+/* Disabling exceptions in boost::posix_time::time_duration requires stringstream which requires a string to initialise.
+ */
+					iss_.str (value_);
+					if (iss_ >> td) bin_decl->bin_start = td;
 				} else if (key == kClose) {
-					iss.str (value);
-					if (iss >> td) bin_decl->bin_end = td;
+					iss_.str (value_);
+					if (iss_ >> td) bin_decl->bin_end = td;
 				} else if (key == kOffset) {
-					const unsigned offset = (unsigned)std::atol (value.c_str());
+/* Numeric value parsing requires a NULL terminated char array.
+ */
+					const unsigned offset = (unsigned)std::atol (value_.c_str());
 					*day_offset = (offset < kMaximumDayOffset) ? offset : kMaximumDayOffset;
 				} else if (key == kDays) {
-					const unsigned count = (unsigned)std::atol (value.c_str());
+					const unsigned count = (unsigned)std::atol (value_.c_str());
 					bin_decl->bin_day_count = (count < kMaximumDayCount) ? count : kMaximumDayCount;
 				} else if (key == kTimezone ) {
-					const boost::local_time::time_zone_ptr tzptr = tzdb_.time_zone_from_region (value);
+/* Time zone lookup in an C++11 unordered map using a std::string index.
+ */
+					const boost::local_time::time_zone_ptr tzptr = tzdb_.time_zone_from_region (value_);
 					if (nullptr != tzptr) bin_decl->bin_tz = tzptr;
 				}
  			}
@@ -647,7 +677,8 @@ protected:
 /* RIC decomposition */
 	url_parse::Parsed parsed_;
 	url_parse::Component file_name_;
-	std::string url_;
+	std::string url_, value_, item_name_;
+	std::istringstream iss_;
 
 /* FLexRecord cursor */
 	FlexRecDefinitionManager* manager_;

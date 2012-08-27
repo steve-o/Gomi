@@ -666,28 +666,28 @@ gomi::client_t::OnItemRequest (
 				DVLOG(4) << "item name: [" << item_name << "] len: " << item_name_len;
 				url_parse::Parsed parsed;
 				url_parse::Component file_name;
-				std::string url ("vta://localhost");
-				url.append (item_name, item_name_len);
-				url_parse::ParseStandardURL (url.c_str(), static_cast<int>(url.size()), &parsed);
+				url_.assign ("vta://localhost");
+				url_.append (item_name, item_name_len);
+				url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed);
 				if (parsed.path.is_valid())
-					url_parse::ExtractFileName (url.c_str(), parsed.path, &file_name);
+					url_parse::ExtractFileName (url_.c_str(), parsed.path, &file_name);
 				if (!file_name.is_valid()) {
 					cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
 					LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
 					SendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotFoundEnum);
 					return;
 				}
-				const std::string parsed_file_name (url.c_str() + file_name.begin, file_name.len);
+				underlying_symbol_.assign (url_.c_str() + file_name.begin, file_name.len);
 /* check for item in inventory */
 				boost::shared_lock<boost::shared_mutex> directory_lock (provider_->directory_lock_);
-				auto it = provider_->directory_.find (parsed_file_name);
+				auto it = provider_->directory_.find (underlying_symbol_);
 				if (it == provider_->directory_.end()) {
 					cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
-					LOG(INFO) << prefix_ << "Closing request for unknown item \"" << parsed_file_name << "\".";
+					LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
 					SendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotFoundEnum);
 					return;
 				}
-				DVLOG(4) << prefix_ << "Forwarding request for \"" << parsed_file_name << "\".";
+				DVLOG(4) << prefix_ << "Forwarding request for \"" << underlying_symbol_ << "\".";
 				auto& stream = it->second;
 				DCHECK ((bool)stream);
 				auto client_request = std::make_shared<request_t> (stream, shared_from_this(), is_streaming_request, use_attribinfo_in_updates);
@@ -701,7 +701,7 @@ gomi::client_t::OnItemRequest (
 				auto& request = provider_->request_;
 				auto& msg = provider_->msg_;
 				request.set_msg_type (provider::Request::MSG_SNAPSHOT);
-				request.mutable_refresh()->set_token ((uintptr_t)request_token);
+				request.mutable_refresh()->set_token (reinterpret_cast<uintptr_t> (request_token));
 				request.mutable_refresh()->set_service_id (service_id);
 				request.mutable_refresh()->set_model_type (model_type);
 				request.mutable_refresh()->set_item_name (item_name, item_name_len);

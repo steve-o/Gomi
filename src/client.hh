@@ -141,6 +141,10 @@ namespace gomi
 		uint8_t rwf_major_version_;
 		uint8_t rwf_minor_version_;
 
+/* Pre-allocated parsing state */
+		std::string url_;
+		std::string underlying_symbol_;
+
 /* Item requests may appear before login success has been granted.
  */
 		bool is_logged_in_;
