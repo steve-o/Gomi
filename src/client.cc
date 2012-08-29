@@ -22,11 +22,13 @@ using rfa::common::RFA_String;
 
 gomi::client_t::client_t (
 	std::shared_ptr<gomi::provider_t> provider,
-	const rfa::common::Handle* handle
+	const rfa::common::Handle* handle,
+	const char* address
 	) :
 	creation_time_ (boost::posix_time::second_clock::universal_time()),
 	last_activity_ (creation_time_),
 	provider_ (provider),
+	address_ (address),
 	handle_ (nullptr),
 	login_token_ (nullptr),
 	rwf_major_version_ (0),
@@ -36,7 +38,7 @@ gomi::client_t::client_t (
 	ZeroMemory (cumulative_stats_, sizeof (cumulative_stats_));
 	ZeroMemory (snap_stats_, sizeof (snap_stats_));
 
-/* Set logger ID */
+/* Set logger ID: note prefix_ is abused in gomiMIB.cc as source for serialized handle. */
 	std::ostringstream ss;
 	ss << handle << ':';
 	prefix_.assign (ss.str());
@@ -377,6 +379,9 @@ gomi::client_t::AcceptLogin (
 	attribInfo.setNameType (login_msg.getAttribInfo().getNameType());
 	attribInfo.setName (login_msg.getAttribInfo().getName());
 
+/* save name for SNMP */
+	name_.assign (login_msg.getAttribInfo().getName().c_str(), login_msg.getAttribInfo().getName().size());
+
 	auto& elementList = provider_->elementList_;
 	elementList.setAssociatedMetaInfo (GetRwfMajorVersion(), GetRwfMinorVersion());
 /* Clear required for SingleWriteIterator state machine. */
@@ -586,8 +591,9 @@ gomi::client_t::OnItemRequest (
 		const bool use_attribinfo_in_updates = (0 != (request_msg.getIndicationMask() & rfa::message::ReqMsg::AttribInfoInUpdatesFlag));
 
 		if (!is_logged_in_) {
+			cumulative_stats_[CLIENT_PC_ITEM_REQUEST_BEFORE_LOGIN]++;
 			cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
-			LOG(INFO) << prefix_ << "Closing request for client without accepted login.";
+			LOG(INFO) << prefix_ << "Rejecting request for client without accepted login.";
 			SendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotAuthorizedEnum);
 			return;
 		}
@@ -595,127 +601,50 @@ gomi::client_t::OnItemRequest (
 /* Only accept MMT_MARKET_PRICE. */
 		if (rfa::rdm::MMT_MARKET_PRICE != model_type)
 		{
-			cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
-			LOG(INFO) << prefix_ << "Closing request for unsupported message model type.";
-			SendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotAuthorizedEnum);
+			cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
+			cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
+			LOG(INFO) << prefix_ << "Rejecting request for unsupported message model type.";
+			SendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotFoundEnum);
 			return;
 		}
 
 		const bool is_streaming_request = (request_msg.getInteractionType() == streaming_request);
 /* 7.4.3.2 Request Tokens
- * Providers should not attempt to submit data after the provider has received a close request for an item. */
+ * Providers should not attempt to submit data after the provider has received a close request for an item.
+ */
 		const bool is_close             = (request_msg.getInteractionType() == close_request);
 
-/* check for request token in client watchlist. */
-		auto it = items_.find (request_token);
-		if (it != items_.end())
+/* capture ServiceID */
+		if (0 == provider_->GetServiceId() &&
+		    0 == request_msg.getAttribInfo().getServiceName().compareCase (provider_->GetServiceName()))
 		{
-/* existing request. */
-			if (is_close)
+			LOG(INFO) << prefix_ << "Detected service id #" << service_id << " for \"" << provider_->GetServiceName() << "\".";
+			provider_->SetServiceId (service_id);
+		}
+
+		if (is_close)
+		{
+			if (!provider_->RemoveRequest (request_token))
 			{
-/* remove from item client list. */
-				cumulative_stats_[CLIENT_PC_ITEM_CLOSE_REQUEST_RECEIVED]++;
-				LOG(INFO) << prefix_ << "Closing open request.";
-				auto sp = it->second.lock();
-				if ((bool)sp) {
-					auto stream = sp.get();
-					boost::upgrade_lock<boost::shared_mutex> lock (stream->lock);
-					auto it = stream->requests.find (request_token);
-					DCHECK (it != stream->requests.end());
-					boost::upgrade_to_unique_lock<boost::shared_mutex> uniqueLock (lock);
-					stream->requests.erase (it);
-				}
-/* remove from client item list. */
-				items_.erase (it);
+				cumulative_stats_[CLIENT_PC_ITEM_REQUEST_DISCARDED]++;
+				LOG(INFO) << prefix_ << "Discarding close request on closed item.";
 			}
 			else
-			{
-/* invalid. */
-				cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
-				LOG(INFO) << prefix_ << "Closing open request on invalid reissue request.";
-				SendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotAuthorizedEnum);
+			{		
+				cumulative_stats_[CLIENT_PC_ITEM_CLOSED]++;
+				DLOG(INFO) << prefix_ << "Closing open request.";
 			}
+		}
+		else if (is_streaming_request)
+		{
+/* closest equivalent to not-supported is NotAuthorizedEnum. */
+			cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
+			LOG(INFO) << prefix_ << "Rejecting unsupported streaming request.";
+			SendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotAuthorizedEnum);
 		}
 		else
 		{
-/* capture ServiceID */
-			if (0 == provider_->GetServiceId()
-			    && 0 == request_msg.getAttribInfo().getServiceName().compareCase (provider_->GetServiceName()))
-			{
-				LOG(INFO) << prefix_ << "Detected service id #" << service_id << " for \"" << provider_->GetServiceName() << "\".";
-				provider_->SetServiceId (service_id);
-			}
-
-/* new request. */
-			if (is_close)
-			{
-/* invalid. */
-				cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
-				LOG(INFO) << prefix_ << "Discarding close request on closed item.";
-			}
-			else if (is_streaming_request)
-			{
-/* closest equivalent to not-supported is NotAuthorizedEnum. */
-				cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
-				LOG(INFO) << prefix_ << "Closing unsupported streaming request.";
-				SendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotAuthorizedEnum);
-			}
-			else
-			{
-/* decompose request */
-				DVLOG(4) << "item name: [" << item_name << "] len: " << item_name_len;
-				url_parse::Parsed parsed;
-				url_parse::Component file_name;
-				url_.assign ("vta://localhost");
-				url_.append (item_name, item_name_len);
-				url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed);
-				if (parsed.path.is_valid())
-					url_parse::ExtractFileName (url_.c_str(), parsed.path, &file_name);
-				if (!file_name.is_valid()) {
-					cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
-					LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
-					SendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotFoundEnum);
-					return;
-				}
-				underlying_symbol_.assign (url_.c_str() + file_name.begin, file_name.len);
-/* check for item in inventory */
-				boost::shared_lock<boost::shared_mutex> directory_lock (provider_->directory_lock_);
-				auto it = provider_->directory_.find (underlying_symbol_);
-				if (it == provider_->directory_.end()) {
-					cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
-					LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
-					SendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotFoundEnum);
-					return;
-				}
-				DVLOG(4) << prefix_ << "Forwarding request for \"" << underlying_symbol_ << "\".";
-				auto& stream = it->second;
-				DCHECK ((bool)stream);
-				auto client_request = std::make_shared<request_t> (stream, shared_from_this(), is_streaming_request, use_attribinfo_in_updates);
-				CHECK((bool)client_request);
-				boost::unique_lock<boost::shared_mutex> requests_lock (provider_->requests_lock_);
-				boost::unique_lock<boost::shared_mutex> stream_lock (stream->lock);
-				provider_->requests_.emplace (std::make_pair (request_token, client_request));	/* weak */
-				stream->requests.emplace (std::make_pair (request_token, client_request));	/* strong */
-
-/* forward request to worker pool */
-				auto& request = provider_->request_;
-				auto& msg = provider_->msg_;
-				request.set_msg_type (provider::Request::MSG_SNAPSHOT);
-				request.mutable_refresh()->set_token (reinterpret_cast<uintptr_t> (request_token));
-				request.mutable_refresh()->set_service_id (service_id);
-				request.mutable_refresh()->set_model_type (model_type);
-				request.mutable_refresh()->set_item_name (item_name, item_name_len);
-				request.mutable_refresh()->set_rwf_major_version (rwf_major_version_);
-				request.mutable_refresh()->set_rwf_minor_version (rwf_minor_version_);
-				int rc = zmq_msg_init_size (&msg, request.ByteSize());
-				CHECK(0 == rc);
-				request.SerializeToArray (zmq_msg_data (&msg), static_cast<int> (zmq_msg_size (&msg)));
-				auto sock = provider_->request_sock_.get();
-				rc = zmq_send (sock, &msg, 0);
-				CHECK(0 == rc);
-				rc = zmq_msg_close (&msg);
-				CHECK(0 == rc);
-			}
+			OnItemSnapshotRequest (request_msg, request_token);
 		}
 /* ignore any error */
 	} catch (const rfa::common::InvalidUsageException& e) {
@@ -725,6 +654,75 @@ gomi::client_t::OnItemRequest (
 				", " << request_msg <<
 				", \"RequestToken\": " << (uintptr_t)request_token <<
 				" }";
+	}
+}
+
+void
+gomi::client_t::OnItemSnapshotRequest (
+	const rfa::message::ReqMsg&	request_msg,
+	rfa::sessionLayer::RequestToken*const request_token
+	)
+{
+	const uint32_t service_id    = request_msg.getAttribInfo().getServiceID();
+	const uint8_t  model_type    = request_msg.getMsgModelType();
+	const char*    item_name     = request_msg.getAttribInfo().getName().c_str();
+	const size_t   item_name_len = request_msg.getAttribInfo().getName().size();
+	const bool use_attribinfo_in_updates = (0 != (request_msg.getIndicationMask() & rfa::message::ReqMsg::AttribInfoInUpdatesFlag));
+
+/* decompose request */
+	DVLOG(4) << prefix_ << "item name: [" << item_name << "] len: " << item_name_len;
+	url_parse::Parsed parsed;
+	url_parse::Component file_name;
+	url_.assign ("vta://localhost");
+	url_.append (item_name, item_name_len);
+	url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed);
+	if (parsed.path.is_valid())
+		url_parse::ExtractFileName (url_.c_str(), parsed.path, &file_name);
+	if (!file_name.is_valid()) {
+		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
+		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
+		LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
+		SendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotFoundEnum);
+		return;
+	}
+/* require a NULL terminated string */
+	underlying_symbol_.assign (url_.c_str() + file_name.begin, file_name.len);
+/* check for item in TREP-VA inventory */
+	if (0 == TBPrimitives::IsSymbolExists (underlying_symbol_.c_str())) {
+		cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
+		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
+		LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
+		SendClose (request_token, service_id, model_type, item_name, use_attribinfo_in_updates, rfa::common::RespStatus::NotFoundEnum);
+		return;
+	}
+/* duplicate requests will be silently dropped */
+	if (provider_->AddRequest (request_token, shared_from_this()))
+	{
+/* forward request to worker pool */
+		auto& request = provider_->request_;
+		auto& msg = provider_->msg_;
+		request.set_msg_type (provider::Request::MSG_SNAPSHOT);
+		request.mutable_refresh()->set_token (reinterpret_cast<uintptr_t> (request_token));
+		request.mutable_refresh()->set_service_id (service_id);
+		request.mutable_refresh()->set_model_type (model_type);
+		request.mutable_refresh()->set_item_name (item_name, item_name_len);
+		request.mutable_refresh()->set_rwf_major_version (rwf_major_version_);
+		request.mutable_refresh()->set_rwf_minor_version (rwf_minor_version_);
+		int rc = zmq_msg_init_size (&msg, request.ByteSize());
+		CHECK(0 == rc);
+		request.SerializeToArray (zmq_msg_data (&msg), static_cast<int> (zmq_msg_size (&msg)));
+		auto sock = provider_->request_sock_.get();
+		rc = zmq_send (sock, &msg, 0);
+		CHECK(0 == rc);
+		rc = zmq_msg_close (&msg);
+		CHECK(0 == rc);
+		DVLOG(4) << prefix_ << "Enqueued request for \"" << underlying_symbol_ << "\".";
+	}
+	else
+	{		
+		cumulative_stats_[CLIENT_PC_ITEM_DUPLICATE_SNAPSHOT]++;
+		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_DISCARDED]++;
+		LOG(INFO) << prefix_ << "Ignoring duplicate snapshot request for \"" << item_name << "\"";
 	}
 }
 
@@ -745,21 +743,6 @@ gomi::client_t::OnOMMInactiveClientSessionEvent (
 	try {
 /* reject new item requests. */
 		is_logged_in_ = false;
-/* remove requests from item streams. */
-		VLOG(2) << prefix_ << "Removing client from " << items_.size() << " item streams.";
-		std::for_each (items_.begin(), items_.end(),
-			[&](const std::pair<rfa::sessionLayer::RequestToken*const, std::weak_ptr<item_stream_t>>& item)
-		{
-			auto sp = item.second.lock();
-			if (!(bool)sp)
-				return;
-			boost::upgrade_lock<boost::shared_mutex> lock (sp->lock);
-			auto it = sp->requests.find (item.first);
-			DCHECK(sp->requests.end() != it);
-			boost::upgrade_to_unique_lock<boost::shared_mutex> uniqueLock (lock);
-			sp->requests.erase (it);
-			VLOG(2) << prefix_ << sp->rfa_name;
-		});
 /* forward upstream to remove reference to this. */
 		provider_->EraseClientSession (handle_);
 /* handle is now invalid. */

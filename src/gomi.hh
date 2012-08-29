@@ -77,21 +77,6 @@ namespace gomi
 	class worker_t;
 	class snmp_agent_t;
 
-/* Archive streams match a specific bin analytic query. */
-	class archive_stream_t : public item_stream_t
-	{
-	public:
-		archive_stream_t (const std::string& underlying_symbol_) :
-			underlying_symbol (underlying_symbol_),
-			handle (TBPrimitives::GetSymbolHandle (underlying_symbol.c_str(), 1))
-		{
-		}
-
-/* source feed name, not the name of the derived feed symbol */
-		const std::string underlying_symbol;
-		const TBSymbolHandle handle;
-	};
-
 	class event_pump_t
 	{
 	public:
@@ -167,8 +152,6 @@ namespace gomi
 		int TclFeedLogQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 		int TclHistogramDump (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 
-		bool IsSpecialBin (const bin_decl_t& bin) const;
-
 /* Unique instance number per process. */
 		LONG instance_;
 		static LONG volatile instance_count_;
@@ -197,6 +180,12 @@ namespace gomi
 
 		friend Netsnmp_Next_Data_Point gomiPluginPerformanceTable_get_next_data_point;
 		friend Netsnmp_Node_Handler gomiPluginPerformanceTable_handler;
+
+		friend Netsnmp_First_Data_Point gomiClientTable_get_first_data_point;
+		friend Netsnmp_Next_Data_Point gomiClientTable_get_next_data_point;
+
+		friend Netsnmp_First_Data_Point gomiClientPerformanceTable_get_first_data_point;
+		friend Netsnmp_Next_Data_Point gomiClientPerformanceTable_get_next_data_point;
 #endif /* GOMIMIB_H */
 
 /* RFA context. */
@@ -216,15 +205,6 @@ namespace gomi
 
 /* Configured time zone */
 		boost::local_time::time_zone_ptr TZ_;
-
-/* Parsed bin decls sorted by close time, not by open-close. */
-		std::set<bin_decl_t, bin_decl_close_compare_t> bins_;
-
-/* last refresh time-of-day, default to not_a_date_time */
-		boost::posix_time::time_duration last_refresh_;
-
-/* Publish instruments. */
-		boost::unordered_map<std::string, std::shared_ptr<archive_stream_t>> directory_;
 
 /* Event pump and thread. */
 		std::unique_ptr<event_pump_t> event_pump_;

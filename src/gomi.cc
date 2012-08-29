@@ -106,74 +106,12 @@ is_business_day (
 	return (0 != TBPrimitives::BusinessDay (time32, &bd));
 }
 
-/* parse from /bin/ decls formatted as <name>=<start>-<end>, e.g. "OPEN=09:00-09:33"
- */
-static
-bool
-ParseBinDecl (
-	const std::string& str,
-	boost::local_time::time_zone_ptr tz,
-	unsigned day_count,
-	gomi::bin_decl_t* bin
-	)
-{
-	DCHECK(nullptr != bin);
-	DLOG(INFO) << "bin decl: \"" << str << "\", tz: " << tz->std_zone_abbrev() << ", day_count: " << day_count;
-
-/* name */
-	std::string::size_type pos1 = str.find_first_of ("=");
-	if (std::string::npos == pos1)
-		return false;
-	bin->bin_name = str.substr (0, pos1);
-	DVLOG(1) << "bin name: " << bin->bin_name;
-
-/* open time */
-	std::string::size_type pos2 = str.find_first_of ("-", pos1);
-	if (std::string::npos == pos2)
-		return false;
-	++pos1;
-	const std::string start (str.substr (pos1, pos2 - pos1));
-	DVLOG(1) << "bin start: " << start;
-	bin->bin_start = boost::posix_time::duration_from_string (start);
-
-/* close time */
-	++pos2;
-	const std::string end (str.substr (pos2));
-	DVLOG(1) << "bin start: " << end;
-	bin->bin_end = boost::posix_time::duration_from_string (end);
-
-/* time zone */
-	bin->bin_tz = tz;
-
-/* bin length */
-	bin->bin_day_count = day_count;
-	return true;
-}
-
-/* read entire symbolmap file into memory and spit into contiguous blocks of
- * non-whitespace characters.  Zoom zoom.
- */
-static
-bool
-ReadSymbolMap (
-	const std::string& symbolmap_file,
-	std::vector<std::string>* symbolmap
-	)
-{
-	std::string contents;
-	if (!file_util::ReadFileToString (symbolmap_file, &contents))
-		return false;
-	chromium::SplitStringAlongWhitespace (contents, symbolmap);
-	return true;
-}
-
 /* Worker thread for processing refresh requests.
  */
 class gomi::worker_t
 {
 public:
 	worker_t (
-		const boost::unordered_map<std::string, std::shared_ptr<archive_stream_t>>& directory,
 		const boost::local_time::tz_database& tzdb,
 		const boost::local_time::time_zone_ptr TZ,
 		const config_t& config,
@@ -186,7 +124,6 @@ public:
 		respmsg_ (false),	/* reference */
 		fields_ (false),
 		attribInfo_ (false),
-		directory_ (directory),
 		tzdb_ (tzdb),
 		TZ_ (TZ),
 		config_ (config)
@@ -382,7 +319,7 @@ protected:
 		unsigned day_offset = 0;
 
 		bin_decl.bin_tz = TZ_;
-		bin_decl.bin_day_count = std::stoi (config_.day_count);
+		bin_decl.bin_day_count = config_.day_count;
 		ParseRIC (stream_name_c, strlen (stream_name_c), &item_name_, &bin_decl, &day_offset);
 
 /* start of bin */
@@ -399,13 +336,9 @@ protected:
 			start_date = *bd_itr;
 		}
 
-/* TREP-VA cached symbol handle */
-		auto directory_it = directory_.find (item_name_);
-		DCHECK(directory_.end() != directory_it);
-
 /* run analytic on bin and send result */
 		try {
-			bin_t bin (bin_decl, directory_it->second->handle, kDefaultLastPriceField, kDefaultTickVolumeField);
+			bin_t bin (bin_decl, item_name_.c_str(), kDefaultLastPriceField, kDefaultTickVolumeField);
 			VLOG(2) << prefix_ << "Processing bin: " << bin_decl;
 			bin.Calculate (start_date, work_area_.get(), view_element_.get());
 			SendSnapshot (bin, service_id, stream_name, rwf_major_version, rwf_minor_version, token);
@@ -698,7 +631,6 @@ protected:
 	std::shared_ptr<rfa::data::SingleWriteIterator> single_write_it_;	/* no copy ctor */
 
 /* application reference */
-	const boost::unordered_map<std::string, std::shared_ptr<archive_stream_t>>& directory_;
 	const boost::local_time::tz_database& tzdb_;
 	const boost::local_time::time_zone_ptr TZ_;
 	const config_t& config_;
@@ -707,7 +639,6 @@ protected:
 gomi::gomi_t::gomi_t()
 	:
 	is_shutdown_ (false),
-	last_refresh_ (boost::posix_time::not_a_date_time),
 	last_activity_ (boost::posix_time::microsec_clock::universal_time()),
 	min_tcl_time_ (boost::posix_time::pos_infin),
 	max_tcl_time_ (boost::posix_time::neg_infin),
@@ -758,16 +689,6 @@ gomi::gomi_t::~gomi_t()
 #endif
 }
 
-/* is bin not a 10-minute time period, i.e. a realtime component.
- */
-bool
-gomi::gomi_t::IsSpecialBin (const gomi::bin_decl_t& bin) const
-{
-	assert (!bin.bin_name.empty());
-	auto it = config_.realtime_fids.find (bin.bin_name);
-	return (it != config_.realtime_fids.end());
-}
-
 /* Plugin entry point from the Velocity Analytics Engine.
  */
 
@@ -812,9 +733,23 @@ gomi::gomi_t::Init()
 	std::function<int(void*)> zmq_term_deleter = zmq_term;
 	std::function<int(void*)> zmq_close_deleter = zmq_close;
 
-	std::vector<std::string> symbolmap;
-
 	LOG(INFO) << config_;
+
+	try {
+/* FlexRecord cursor for Tcl thread processing. */
+		manager_ = FlexRecDefinitionManager::GetInstance (nullptr);
+		work_area_.reset (manager_->AcquireWorkArea(), [this](FlexRecWorkAreaElement* work_area){ manager_->ReleaseWorkArea (work_area); });
+		view_element_.reset (manager_->AcquireView(), [this](FlexRecViewElement* view_element){ manager_->ReleaseView (view_element); });
+
+		if (!manager_->GetView ("Trade", view_element_->view)) {
+			LOG(ERROR) << "FlexRecDefinitionManager::GetView failed";
+		}
+	} catch (std::exception& e) {
+		LOG(ERROR) << "FlexRecord::Exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
+		return false;
+	}
 
 	try {
 /* ZeroMQ context. */
@@ -855,36 +790,6 @@ gomi::gomi_t::Init()
 		return false;
 	}
 
-	try {
-/* /bin/ declarations */
-		const auto day_count = std::stoi (config_.day_count);
-		for (auto it = config_.bins.begin(); it != config_.bins.end(); ++it)
-		{
-			bin_decl_t bin;
-			if (!ParseBinDecl (*it, TZ_, day_count, &bin)) {
-				LOG(ERROR) << "Cannot parse bin delcs.";
-				return false;
-			}
-			bins_.insert (bin);
-		}
-	} catch (const std::exception& e) {
-		LOG(ERROR) << "BinDecl::Exception: { "
-			"\"What\": \"" << e.what() << "\" }";
-		return false;
-	}
-
-	try {
-/* "Symbol map" a.k.a. list of Reuters Instrument Codes (RICs). */
-		if (!ReadSymbolMap (config_.symbolmap, &symbolmap)) {
-			LOG(ERROR) << "Cannot read symbolmap file: " << config_.symbolmap;
-			return false;
-		}
-	} catch (const std::exception& e) {
-		LOG(ERROR) << "SymbolMap::Exception: { "
-			"\"What\": \"" << e.what() << "\" }";
-		return false;
-	}
-
 /** RFA initialisation. **/
 	try {
 /* RFA context. */
@@ -908,16 +813,6 @@ gomi::gomi_t::Init()
 		provider_.reset (new provider_t (config_, rfa_, event_queue_, zmq_context_));
 		if (!(bool)provider_ || !provider_->Init())
 			return false;
-
-/* Create state for published instruments: For every instrument, e.g. MSFT.O
- */
-		std::for_each (symbolmap.begin(), symbolmap.end(), [&](const std::string& symbol) {
-			auto stream = std::make_shared<archive_stream_t> (symbol);
-			CHECK ((bool)stream);
-			bool status = provider_->CreateItemStream (symbol.c_str(), stream);
-			CHECK (status);
-			directory_.emplace (std::make_pair (symbol, std::move (stream)));
-		});
 	} catch (const rfa::common::InvalidUsageException& e) {
 		LOG(ERROR) << "InvalidUsageException: { "
 			  "\"Severity\": \"" << severity_string (e.getSeverity()) << "\""
@@ -951,7 +846,7 @@ gomi::gomi_t::Init()
 		for (size_t i = 0; i < config_.worker_count; ++i) {
 			const unsigned worker_id = (unsigned)(1 + i);
 			LOG(INFO) << "Spawning worker #" << worker_id;
-			auto worker = std::make_shared<worker_t> (directory_, tzdb_, TZ_, config_, zmq_context_, worker_id);
+			auto worker = std::make_shared<worker_t> (tzdb_, TZ_, config_, zmq_context_, worker_id);
 			if (!(bool)worker)
 				return false;
 			auto thread = std::make_shared<boost::thread> ([worker](){ if (worker->Init()) worker->Run(); });
@@ -1068,7 +963,6 @@ gomi::gomi_t::Clear()
 /* Release everything with an 0mq & RFA dependency. */
 	event_thread_.reset();
 	event_pump_.reset();
-	directory_.clear();
 /* Release 0mq sockets before context */
 	if ((bool)provider_)
 		provider_->Clear();

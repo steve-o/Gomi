@@ -55,43 +55,16 @@ namespace gomi
 	};
 
 	class client_t;
-	class item_stream_t;
 
 	class request_t : boost::noncopyable
 	{
 	public:
-		request_t (std::shared_ptr<item_stream_t> item_stream_, std::shared_ptr<client_t> client_, bool is_streaming_, bool use_attribinfo_in_updates_)
-			: item_stream (item_stream_),
-			  client (client_),
-			  is_streaming (is_streaming_),
-			  use_attribinfo_in_updates (use_attribinfo_in_updates_),
-			  has_initial_image (false)
+		request_t (std::shared_ptr<client_t> client_)
+			:  client (client_)
 		{
 		}
 
-		std::weak_ptr<item_stream_t> item_stream;
 		std::weak_ptr<client_t> client;
-		const bool is_streaming;
-		const bool use_attribinfo_in_updates;	/* can theoretically change in reissue */
-/* RFA will return a CmdError message if the provider application submits data
- * before receiving a login success message.  Mute downstream publishing until
- * permission is granted to submit data.
- */
-		boost::atomic_bool has_initial_image;
-	};
-
-	class item_stream_t : boost::noncopyable
-	{
-	public:
-		item_stream_t ()
-		{
-		}
-
-/* Fixed name for this stream. */
-		rfa::common::RFA_String rfa_name;
-/* Request tokens for clients, can be more than one per client. */
-		boost::unordered_map<rfa::sessionLayer::RequestToken*const, std::shared_ptr<request_t>> requests;
-		boost::shared_mutex lock;
 	};
 
 	class provider_t :
@@ -106,7 +79,6 @@ namespace gomi
 		bool Init() throw (rfa::common::InvalidConfigurationException, rfa::common::InvalidUsageException);
 		void Clear();
 
-		bool CreateItemStream (const char* name, std::shared_ptr<item_stream_t> item_stream) throw (rfa::common::InvalidUsageException);
 		bool SendReply (rfa::message::RespMsg*const msg, rfa::sessionLayer::RequestToken*const token) throw (rfa::common::InvalidUsageException);
 		uint32_t Submit (rfa::message::RespMsg*const msg, rfa::sessionLayer::RequestToken*const token, void* closure) throw (rfa::common::InvalidUsageException);
 
@@ -128,8 +100,8 @@ namespace gomi
 		void OnOMMActiveClientSessionEvent (const rfa::sessionLayer::OMMActiveClientSessionEvent& event);
 		void OnOMMCmdErrorEvent (const rfa::sessionLayer::OMMCmdErrorEvent& event);
 
-		bool RejectClientSession (const rfa::common::Handle* handle);
-		bool AcceptClientSession (const rfa::common::Handle* handle);
+		bool RejectClientSession (const rfa::common::Handle* handle, const char* address);
+		bool AcceptClientSession (const rfa::common::Handle* handle, const char* address);
 		bool EraseClientSession (rfa::common::Handle* handle);
 
 		void GetDirectoryResponse (rfa::message::RespMsg* msg, uint8_t rwf_major_version, uint8_t rwf_minor_version, const char* service_name, uint32_t filter_mask, uint8_t response_type);
@@ -139,6 +111,9 @@ namespace gomi
 		void GetServiceCapabilities (rfa::data::SingleWriteIterator* it);
 		void GetServiceDictionaries (rfa::data::SingleWriteIterator* it);
 		void GetServiceState (rfa::data::SingleWriteIterator* it, uint8_t rwf_major_version, uint8_t rwf_minor_version);
+
+		bool AddRequest (rfa::sessionLayer::RequestToken*const token, std::shared_ptr<gomi::client_t> client);
+		bool RemoveRequest (rfa::sessionLayer::RequestToken*const token);
 
 		void SetServiceId (uint32_t service_id) {
 			service_id_.store (service_id);
@@ -172,7 +147,7 @@ namespace gomi
 		friend client_t;
 
 /* Entire request set */
-		boost::unordered_map<rfa::sessionLayer::RequestToken*const, std::weak_ptr<request_t>> requests_;
+		boost::unordered_map<rfa::sessionLayer::RequestToken*const, std::weak_ptr<client_t>> requests_;
 		boost::shared_mutex requests_lock_;
 
 /* Reuters Wire Format versions. */
@@ -201,10 +176,6 @@ namespace gomi
 		bool is_accepting_connections_;
 		bool is_accepting_requests_;
 
-/* Container of all item streams keyed by symbol name. */
-		boost::unordered_map<std::string, std::shared_ptr<item_stream_t>> directory_;
-		boost::shared_mutex directory_lock_;
-
 /* RFA request thread client. */
 		std::shared_ptr<void> zmq_context_;
 		std::shared_ptr<void> request_sock_;
@@ -216,6 +187,13 @@ namespace gomi
 
 #ifdef GOMIMIB_H
 		friend Netsnmp_Node_Handler gomiPluginPerformanceTable_handler;
+
+		friend Netsnmp_First_Data_Point gomiClientTable_get_first_data_point;
+		friend Netsnmp_Next_Data_Point gomiClientTable_get_next_data_point;
+		friend Netsnmp_Node_Handler gomiClientTable_handler;
+
+		friend Netsnmp_First_Data_Point gomiClientPerformanceTable_get_first_data_point;
+		friend Netsnmp_Next_Data_Point gomiClientPerformanceTable_get_next_data_point;
 #endif /* GOMIMIB_H */
 	};
 

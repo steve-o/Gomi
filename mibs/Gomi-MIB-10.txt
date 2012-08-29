@@ -91,14 +91,12 @@ gomiPluginEntry ::= SEQUENCE {
 		Unsigned32,
 	gomiPluginRicSuffix 
 		OCTET STRING,
-	gomiPluginSymbolmap
-		OCTET STRING,
 	gomiPluginDefaultTimezone
 		OCTET STRING,
 	gomiPluginTimezoneDatabase
 		OCTET STRING,
 	gomiPluginDefaultDayCount
-		OCTET STRING
+		Unsigned32
 	}
 
 gomiPluginId OBJECT-TYPE
@@ -191,21 +189,13 @@ gomiPluginRicSuffix OBJECT-TYPE
 		"Fixed suffix for published RICs."
 	::= { gomiPluginEntry 11 }
 
-gomiPluginSymbolmap OBJECT-TYPE
-	SYNTAX     OCTET STRING (SIZE (1..255))
-	MAX-ACCESS read-only
-	STATUS     current
-	DESCRIPTION
-		"File path for underlying symbol directory."
-	::= { gomiPluginEntry 12 }
-
 gomiPluginDefaultTimezone OBJECT-TYPE
 	SYNTAX     OCTET STRING (SIZE (1..255))
 	MAX-ACCESS read-only
 	STATUS     current
 	DESCRIPTION
 		"Default time zone for unspecified requests."
-	::= { gomiPluginEntry 13 }
+	::= { gomiPluginEntry 12 }
 
 gomiPluginTimezoneDatabase OBJECT-TYPE
 	SYNTAX     OCTET STRING (SIZE (1..255))
@@ -213,15 +203,15 @@ gomiPluginTimezoneDatabase OBJECT-TYPE
 	STATUS     current
 	DESCRIPTION
 		"File path for Boost::DateTime time zone database."
-	::= { gomiPluginEntry 14 }
+	::= { gomiPluginEntry 13 }
 
 gomiPluginDefaultDayCount OBJECT-TYPE
-	SYNTAX     OCTET STRING (SIZE (1..255))
+	SYNTAX     Unsigned32
 	MAX-ACCESS read-only
 	STATUS     current
 	DESCRIPTION
 		"Default bin length in days."
-	::= { gomiPluginEntry 15 }
+	::= { gomiPluginEntry 14 }
 
 -- Plugin Performance Management Table
 
@@ -411,10 +401,10 @@ gomiClientEntry ::= SEQUENCE {
 	gomiClientPluginUniqueInstance
 		Unsigned32,
 	gomiClientUniqueInstance
-		Unsigned32,
-	gomiClientHostname,
 		OCTET STRING,
-	gomiClientIpAddress,
+	gomiClientIpAddress
+		OCTET STRING,
+	gomiClientLoginName
 		OCTET STRING,
 	gomiClientRsslPort 
 		OCTET STRING,
@@ -423,7 +413,7 @@ gomiClientEntry ::= SEQUENCE {
 	gomiClientConnectionName 
 		OCTET STRING,
 	gomiClientPublisherName 
-		OCTET STRING,
+		OCTET STRING
 	}
 
 gomiClientPluginId OBJECT-TYPE
@@ -443,28 +433,20 @@ gomiClientPluginUniqueInstance OBJECT-TYPE
 	::= { gomiClientEntry 2 }
 
 gomiClientUniqueInstance OBJECT-TYPE
-	SYNTAX     Unsigned32
+	SYNTAX     OCTET STRING (SIZE (1..255))
 	MAX-ACCESS not-accessible
 	STATUS     current
 	DESCRIPTION
-		"Unique instance identifier for this session."
+		"Client session handle for this client."
 	::= { gomiClientEntry 3 }
 
-gomiClientHostname, OBJECT-TYPE
-	SYNTAX     OCTET STRING (SIZE (1..255))
-	MAX-ACCESS read-only
-	STATUS     current
-	DESCRIPTION
-		"Client provided hostname."
-	::= { gomiClientEntry 4 }
-
-gomiClientIpAddress, OBJECT-TYPE
+gomiClientIpAddress OBJECT-TYPE
 	SYNTAX     OCTET STRING (SIZE (1..255))
 	MAX-ACCESS read-only
 	STATUS     current
 	DESCRIPTION
 		"Client source IP address."
-	::= { gomiClientEntry 5 }
+	::= { gomiClientEntry 4 }
 
 gomiClientRsslPort OBJECT-TYPE
 	SYNTAX     OCTET STRING (SIZE (1..255))
@@ -472,7 +454,7 @@ gomiClientRsslPort OBJECT-TYPE
 	STATUS     current
 	DESCRIPTION
 		"Listening RSSL IP port."
-	::= { gomiClientEntry 6 }
+	::= { gomiClientEntry 5 }
 
 gomiClientSessionName OBJECT-TYPE
 	SYNTAX     OCTET STRING (SIZE (1..255))
@@ -480,7 +462,7 @@ gomiClientSessionName OBJECT-TYPE
 	STATUS     current
 	DESCRIPTION
 		"RFA session name."
-	::= { gomiClientEntry 7 }
+	::= { gomiClientEntry 6 }
 
 gomiClientConnectionName OBJECT-TYPE
 	SYNTAX     OCTET STRING (SIZE (1..255))
@@ -488,7 +470,7 @@ gomiClientConnectionName OBJECT-TYPE
 	STATUS     current
 	DESCRIPTION
 		"RFA connection name."
-	::= { gomiClientEntry 8 }
+	::= { gomiClientEntry 7 }
 
 gomiClientPublisherName OBJECT-TYPE
 	SYNTAX     OCTET STRING (SIZE (1..255))
@@ -496,6 +478,14 @@ gomiClientPublisherName OBJECT-TYPE
 	STATUS     current
 	DESCRIPTION
 		"RFA publisher name."
+	::= { gomiClientEntry 8 }
+
+gomiClientLoginName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Client username, only set after MMT_LOGIN is received."
 	::= { gomiClientEntry 9 }
 
 -- Session Performance Management Table
@@ -585,6 +575,12 @@ gomiClientPerformanceEntry ::= SEQUENCE {
 	gomiItemCloseRequestReceived
 		Counter32,
 	gomiItemRequestMalformed
+		Counter32,
+	gomiItemRequestBeforeLogin
+		Counter32,
+	gomiItemDuplicateSnapshot
+		Counter32,
+	gomiItemRequestDiscarded
 		Counter32,
 	gomiItemRequestRejected
 		Counter32,
@@ -871,13 +867,37 @@ gomiItemRequestMalformed OBJECT-TYPE
 		"Number of item requests malformed from this client."
 	::= { gomiClientPerformanceEntry 33 }
 
+gomiItemRequestBeforeLogin OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item requests received illegally before login from this client."
+	::= { gomiClientPerformanceEntry 34 }
+
+gomiItemDuplicateSnapshot OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of duplicate item snapshot requests from this client.  Should always be zero."
+	::= { gomiClientPerformanceEntry 35 }
+
+gomiItemRequestDiscarded OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item requests discarded from this client."
+	::= { gomiClientPerformanceEntry 36 }
+
 gomiItemRequestRejected OBJECT-TYPE
 	SYNTAX     Counter32
 	MAX-ACCESS read-only
 	STATUS     current
 	DESCRIPTION
 		"Number of item requests rejected from this client."
-	::= { gomiClientPerformanceEntry 34 }
+	::= { gomiClientPerformanceEntry 37 }
 
 gomiItemValidated OBJECT-TYPE
 	SYNTAX     Counter32
@@ -885,7 +905,7 @@ gomiItemValidated OBJECT-TYPE
 	STATUS     current
 	DESCRIPTION
 		"Number of items validated for this client."
-	::= { gomiClientPerformanceEntry 35 }
+	::= { gomiClientPerformanceEntry 38 }
 
 gomiItemMalformed OBJECT-TYPE
 	SYNTAX     Counter32
@@ -893,7 +913,7 @@ gomiItemMalformed OBJECT-TYPE
 	STATUS     current
 	DESCRIPTION
 		"Number of items malformed for this client."
-	::= { gomiClientPerformanceEntry 36 }
+	::= { gomiClientPerformanceEntry 39 }
 
 gomiItemNotFound OBJECT-TYPE
 	SYNTAX     Counter32
@@ -901,7 +921,7 @@ gomiItemNotFound OBJECT-TYPE
 	STATUS     current
 	DESCRIPTION
 		"Number of unknown item requests from this client."
-	::= { gomiClientPerformanceEntry 37 }
+	::= { gomiClientPerformanceEntry 40 }
 
 gomiItemSent OBJECT-TYPE
 	SYNTAX     Counter32
@@ -909,7 +929,7 @@ gomiItemSent OBJECT-TYPE
 	STATUS     current
 	DESCRIPTION
 		"Number of items sent to this client."
-	::= { gomiClientPerformanceEntry 38 }
+	::= { gomiClientPerformanceEntry 41 }
 
 gomiItemClosed OBJECT-TYPE
 	SYNTAX     Counter32
@@ -917,7 +937,7 @@ gomiItemClosed OBJECT-TYPE
 	STATUS     current
 	DESCRIPTION
 		"Number of items closed to this client."
-	::= { gomiClientPerformanceEntry 39 }
+	::= { gomiClientPerformanceEntry 42 }
 
 gomiItemException OBJECT-TYPE
 	SYNTAX     Counter32
@@ -925,7 +945,7 @@ gomiItemException OBJECT-TYPE
 	STATUS     current
 	DESCRIPTION
 		"Number of item exceptions caught for this client."
-	::= { gomiClientPerformanceEntry 40 }
+	::= { gomiClientPerformanceEntry 43 }
 
 gomiOmmInactiveClientSessionReceived OBJECT-TYPE
 	SYNTAX     Counter32
@@ -933,7 +953,7 @@ gomiOmmInactiveClientSessionReceived OBJECT-TYPE
 	STATUS     current
 	DESCRIPTION
 		"Number of OMM inactive client sessions received from this client."
-	::= { gomiClientPerformanceEntry 41 }
+	::= { gomiClientPerformanceEntry 44 }
 
 gomiOmmInactiveClientSessionException OBJECT-TYPE
 	SYNTAX     Counter32
@@ -941,7 +961,6 @@ gomiOmmInactiveClientSessionException OBJECT-TYPE
 	STATUS     current
 	DESCRIPTION
 		"Number of OMM inactive client session exceptions caught for this client."
-	::= { gomiClientPerformanceEntry 42 }
-
+	::= { gomiClientPerformanceEntry 45 }
 
 END

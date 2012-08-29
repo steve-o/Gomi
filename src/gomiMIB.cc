@@ -47,6 +47,7 @@ static_assert (__netsnmp_LOG_DEBUG   == LOG_DEBUG,   "LOG_DEBUG mismatch");
 #include "chromium/logging.hh"
 #include "gomi.hh"
 #include "provider.hh"
+#include "client.hh"
 
 namespace gomi {
 
@@ -65,6 +66,18 @@ static Netsnmp_First_Data_Point gomiPluginPerformanceTable_get_first_data_point;
 static Netsnmp_Next_Data_Point gomiPluginPerformanceTable_get_next_data_point;
 static Netsnmp_Free_Loop_Context gomiPluginPerformanceTable_free_loop_context;
 
+static int initialize_table_gomiClientTable(void);
+static Netsnmp_Node_Handler gomiClientTable_handler;
+static Netsnmp_First_Data_Point gomiClientTable_get_first_data_point;
+static Netsnmp_Next_Data_Point gomiClientTable_get_next_data_point;
+static Netsnmp_Free_Loop_Context gomiClientTable_free_loop_context;
+
+static int initialize_table_gomiClientPerformanceTable(void);
+static Netsnmp_Node_Handler gomiClientPerformanceTable_handler;
+static Netsnmp_First_Data_Point gomiClientPerformanceTable_get_first_data_point;
+static Netsnmp_Next_Data_Point gomiClientPerformanceTable_get_next_data_point;
+static Netsnmp_Free_Loop_Context gomiClientPerformanceTable_free_loop_context;
+
 /* Context during a SNMP query, lock on global list of gomi_t objects and iterator.
  */
 class snmp_context_t
@@ -81,6 +94,7 @@ public:
 	boost::shared_lock<boost::shared_mutex> lock;
 	std::list<gomi::gomi_t*>& gomi_list;
 	std::list<gomi::gomi_t*>::iterator gomi_it;
+	boost::unordered_map<rfa::common::Handle*const, std::shared_ptr<client_t>>::iterator client_it;
 
 /* SNMP agent is not-reentrant, ignore locking. */
 	static std::list<std::shared_ptr<snmp_context_t>> global_list;
@@ -100,6 +114,14 @@ init_gomiMIB(void)
 	}
 	if (MIB_REGISTERED_OK != initialize_table_gomiPluginPerformanceTable()) {
 		LOG(ERROR) << "gomiPluginPerformanceTable registration: see SNMP log for further details.";
+		return false;
+	}
+	if (MIB_REGISTERED_OK != initialize_table_gomiClientTable()) {
+		LOG(ERROR) << "gomiClientTable registration: see SNMP log for further details.";
+		return false;
+	}
+	if (MIB_REGISTERED_OK != initialize_table_gomiClientPerformanceTable()) {
+		LOG(ERROR) << "gomiClientPerformanceTable registration: see SNMP log for further details.";
 		return false;
 	}
 	return true;
@@ -322,15 +344,15 @@ gomiPluginTable_handler (
 				{
 					const unsigned maximum_data_size = (unsigned)gomi->config_.maximum_data_size;
 					snmp_set_var_typed_value (var, ASN_UNSIGNED,
-						(const u_char*)maximum_data_size, sizeof (maximum_data_size));
+						(const u_char*)&maximum_data_size, sizeof (maximum_data_size));
 				}
 				break;
 
 			case COLUMN_GOMIPLUGINSESSIONCAPACITY:
 				{
-					const unsigned session_capacity = (unsigned)gomi->config_.session_capacity;
+					const unsigned session_capacity = (unsigned)gomi->config_.sessions[0].session_capacity;
 					snmp_set_var_typed_value (var, ASN_UNSIGNED,
-						(const u_char*)session_capacity, sizeof (session_capacity));
+						(const u_char*)&session_capacity, sizeof (session_capacity));
 				}
 				break;
 
@@ -338,18 +360,13 @@ gomiPluginTable_handler (
 				{
 					const unsigned worker_count = (unsigned)gomi->config_.worker_count;
 					snmp_set_var_typed_value (var, ASN_UNSIGNED,
-						(const u_char*)worker_count, sizeof (worker_count));
+						(const u_char*)&worker_count, sizeof (worker_count));
 				}
 				break;
 
 			case COLUMN_GOMIPLUGINRICSUFFIX:
 				snmp_set_var_typed_value (var, ASN_OCTET_STR,
 					(const u_char*)gomi->config_.suffix.c_str(), gomi->config_.suffix.length());
-				break;
-
-			case COLUMN_GOMIPLUGINSYMBOLMAP:
-				snmp_set_var_typed_value (var, ASN_OCTET_STR,
-					(const u_char*)gomi->config_.symbolmap.c_str(), gomi->config_.symbolmap.length());
 				break;
 
 			case COLUMN_GOMIPLUGINDEFAULTTIMEZONE:
@@ -363,8 +380,11 @@ gomiPluginTable_handler (
 				break;
 
 			case COLUMN_GOMIPLUGINDEFAULTDAYCOUNT:
-				snmp_set_var_typed_value (var, ASN_OCTET_STR,
-					(const u_char*)gomi->config_.day_count.c_str(), gomi->config_.day_count.length());
+				{
+					const unsigned day_count = (unsigned)gomi->config_.day_count;
+					snmp_set_var_typed_value (var, ASN_UNSIGNED,
+						(const u_char*)&day_count, sizeof (day_count));
+				}
 				break;
 
 			default:
@@ -690,6 +710,857 @@ gomiPluginPerformanceTable_handler (
 
 	default:
 		snmp_log (__netsnmp_LOG_ERR, "gomiPluginPerformanceTable_handler: unsupported mode.\n");
+		break;
+    }
+
+    return SNMP_ERR_NOERROR;
+}
+
+/* Initialize the gomiClientTable table by defining its contents and how it's structured.
+ */
+static
+int
+initialize_table_gomiClientTable(void)
+{
+	DLOG(INFO) << "initialize_table_gomiClientTable()";
+
+	static const oid gomiClientTable_oid[] = {1,3,6,1,4,1,67,3,2,5};
+	const size_t gomiClientTable_oid_len = OID_LENGTH (gomiClientTable_oid);
+	netsnmp_handler_registration* reg = nullptr;
+	netsnmp_iterator_info* iinfo = nullptr;
+	netsnmp_table_registration_info* table_info = nullptr;
+
+	reg = netsnmp_create_handler_registration (
+		"gomiClientTable",	gomiClientTable_handler,
+		gomiClientTable_oid,	gomiClientTable_oid_len,
+		HANDLER_CAN_RONLY
+		);
+	if (nullptr == reg)
+		goto error;
+
+	table_info = SNMP_MALLOC_TYPEDEF (netsnmp_table_registration_info);
+	if (nullptr == table_info)
+		goto error;
+	netsnmp_table_helper_add_indexes (table_info,
+					  ASN_OCTET_STR,  /* index: gomiClientPluginId */
+					  ASN_UNSIGNED,  /* index: gomiClientPluginInstance */
+					  ASN_OCTET_STR,  /* index: gomiClientUniqueInstance */
+					  0);
+	table_info->min_column = COLUMN_GOMICLIENTIPADDRESS;
+	table_info->max_column = COLUMN_GOMICLIENTLOGINNAME;
+    
+	iinfo = SNMP_MALLOC_TYPEDEF (netsnmp_iterator_info);
+	if (nullptr == iinfo)
+		goto error;
+	iinfo->get_first_data_point	= gomiClientTable_get_first_data_point;
+	iinfo->get_next_data_point	= gomiClientTable_get_next_data_point;
+	iinfo->free_loop_context_at_end	= gomiClientTable_free_loop_context;
+	iinfo->table_reginfo		= table_info;
+    
+	return netsnmp_register_table_iterator (reg, iinfo);
+
+error:
+	if (table_info && table_info->indexes)		/* table_data_free_func() is internal */
+		snmp_free_var (table_info->indexes);
+	SNMP_FREE (table_info);
+	SNMP_FREE (iinfo);
+	netsnmp_handler_registration_free (reg);
+	return -1;
+}
+
+/* Example iterator hook routines - using 'get_next' to do most of the work */
+static 
+netsnmp_variable_list*
+gomiClientTable_get_first_data_point (
+	void**			my_loop_context,	/* valid through one query of multiple "data points" */
+	void**			my_data_context,	/* answer blob which is passed to handler() */
+	netsnmp_variable_list*	put_index_data,		/* answer */
+	netsnmp_iterator_info*	mydata			/* iinfo on init() */
+	)
+{
+	assert (nullptr != my_loop_context);
+	assert (nullptr != my_data_context);
+	assert (nullptr != put_index_data);
+	assert (nullptr != mydata);
+
+	DLOG(INFO) << "gomiClientTable_get_first_data_point()";
+
+/* Create our own context for this SNMP loop, lock on list follows lifetime of context. */
+	std::shared_ptr<snmp_context_t> context (new snmp_context_t (gomi::gomi_t::global_list_lock_, gomi::gomi_t::global_list_));
+	if (!(bool)context || context->gomi_list.empty()) {
+		DLOG(INFO) << "No plugin instances.";
+		return nullptr;
+	}
+
+/* Find first node, through all plugin instances. */
+	for (context->gomi_it = context->gomi_list.begin();
+		context->gomi_it != context->gomi_list.end();
+		++(context->gomi_it))
+	{
+/* and through all sessions for each plugin provider. */
+		context->client_it = (*context->gomi_it)->provider_->clients_.begin();
+		if (context->client_it != (*context->gomi_it)->provider_->clients_.end()) {
+			break;
+		}
+	}
+
+/* no node found. */
+	if (context->client_it == (*context->gomi_it)->provider_->clients_.end()) {
+		DLOG(INFO) << "No client session instances.";
+		return nullptr;
+	}
+
+/* Save context with NET-SNMP iterator. */
+	*my_loop_context = context.get();
+	snmp_context_t::global_list.push_back (std::move (context));
+
+/* pass on for generic row access */
+	return gomiClientTable_get_next_data_point (my_loop_context, my_data_context, put_index_data,  mydata);
+}
+
+static
+netsnmp_variable_list*
+gomiClientTable_get_next_data_point (
+	void**			my_loop_context,
+	void**			my_data_context,
+	netsnmp_variable_list*	put_index_data,
+	netsnmp_iterator_info*	mydata
+	)
+{
+	assert (nullptr != my_loop_context);
+	assert (nullptr != my_data_context);
+	assert (nullptr != put_index_data);
+	assert (nullptr != mydata);
+
+	DLOG(INFO) << "gomiClientTable_get_next_data_point()";
+
+	snmp_context_t* context = static_cast<snmp_context_t*>(*my_loop_context);
+	netsnmp_variable_list *idx = put_index_data;
+
+/* end of data points */
+	if (context->gomi_it == context->gomi_list.end()) {
+		DLOG(INFO) << "End of plugin instances.";
+		return nullptr;
+	}
+	if (context->client_it == (*context->gomi_it)->provider_->clients_.end()) {
+		DLOG(INFO) << "End of client session instances.";
+		return nullptr;
+	}
+
+/* this session instance as a data point */
+	const gomi::client_t* client = (context->client_it->second).get();
+	const gomi::gomi_t* gomi = *context->gomi_it;
+
+/* gomiClientPluginId */
+	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)gomi->plugin_id_.c_str(), gomi->plugin_id_.length());
+        idx = idx->next_variable;
+
+/* gomiClientPluginUniqueInstance */
+	const unsigned instance = gomi->instance_;
+	snmp_set_var_typed_value (idx, ASN_UNSIGNED, (const u_char*)&instance, sizeof (instance));
+        idx = idx->next_variable;
+
+/* gomiClientUniqueInstance */
+	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)client->prefix_.c_str(), client->prefix_.length() - 1);
+
+/* hunt for next valid node */
+	while (++(context->client_it) == (*context->gomi_it)->provider_->clients_.end()) {
+		if (++(context->gomi_it) == context->gomi_list.end()) {
+			break;
+		}
+		context->client_it = (*context->gomi_it)->provider_->clients_.begin();
+	}
+
+/* reference remains in list */
+        *my_data_context = (void*)client;
+        return put_index_data;
+}
+
+static
+void
+gomiClientTable_free_loop_context (
+	void*			my_loop_context,
+	netsnmp_iterator_info*	mydata
+	)
+{
+	assert (nullptr != my_loop_context);
+	assert (nullptr != mydata);
+
+	DLOG(INFO) << "gomiClientTable_free_loop_context ()";
+
+/* delete context and shared lock on global list of all gomi objects */
+	snmp_context_t* context = static_cast<snmp_context_t*>(my_loop_context);
+/* I'm sure there must be a better method :-( */
+	snmp_context_t::global_list.erase (std::remove_if (snmp_context_t::global_list.begin(),
+		snmp_context_t::global_list.end(),
+		[context](std::shared_ptr<snmp_context_t>& shared_context) -> bool {
+			return shared_context.get() == context;
+	}));
+}
+
+/* handles requests for the gomiPluginTable table
+ */
+static
+int
+gomiClientTable_handler (
+	netsnmp_mib_handler*		handler,
+	netsnmp_handler_registration*	reginfo,
+	netsnmp_agent_request_info*	reqinfo,
+	netsnmp_request_info*		requests
+	)
+{
+	assert (nullptr != handler);
+	assert (nullptr != reginfo);
+	assert (nullptr != reqinfo);
+	assert (nullptr != requests);
+
+	DLOG(INFO) << "gomiClientTable_handler()";
+
+	switch (reqinfo->mode) {
+
+/* Read-support (also covers GetNext requests) */
+
+	case MODE_GET:
+		for (netsnmp_request_info* request = requests;
+		     request;
+		     request = request->next)
+		{
+			const gomi::client_t* client = reinterpret_cast<gomi::client_t*>(netsnmp_extract_iterator_context (request));
+			if (nullptr == client) {
+				netsnmp_set_request_error (reqinfo, request, SNMP_NOSUCHINSTANCE);
+				continue;
+			}
+
+			netsnmp_variable_list* var = request->requestvb;
+			netsnmp_table_request_info* table_info = netsnmp_extract_table_info (request);
+			if (nullptr == table_info) {
+				snmp_log (__netsnmp_LOG_ERR, "gomiClientTable_handler: empty table request info.\n");
+				continue;
+			}
+
+			const auto& config = client->provider_->config_;
+			switch (table_info->colnum) {
+						
+			case COLUMN_GOMICLIENTIPADDRESS:
+				snmp_set_var_typed_value (var, ASN_OCTET_STR,
+					(const u_char*)client->address_.c_str(), client->address_.length());
+				break;
+
+			case COLUMN_GOMICLIENTRSSLPORT:
+				snmp_set_var_typed_value (var, ASN_OCTET_STR,
+					(const u_char*)config.sessions[0].rssl_port.c_str(), config.sessions[0].rssl_port.length());
+				break;
+
+			case COLUMN_GOMICLIENTSESSIONNAME:
+				snmp_set_var_typed_value (var, ASN_OCTET_STR,
+					(const u_char*)config.sessions[0].session_name.c_str(), config.sessions[0].session_name.length());
+				break;
+
+			case COLUMN_GOMICLIENTCONNECTIONNAME:
+				snmp_set_var_typed_value (var, ASN_OCTET_STR,
+					(const u_char*)config.sessions[0].connection_name.c_str(), config.sessions[0].connection_name.length());
+				break;
+
+			case COLUMN_GOMICLIENTPUBLISHERNAME:
+				snmp_set_var_typed_value (var, ASN_OCTET_STR,
+					(const u_char*)config.sessions[0].publisher_name.c_str(), config.sessions[0].publisher_name.length());
+				break;
+
+			case COLUMN_GOMICLIENTLOGINNAME:
+				snmp_set_var_typed_value (var, ASN_OCTET_STR,
+					(const u_char*)client->name_.c_str(), client->name_.length());
+				break;
+
+			default:
+				snmp_log (__netsnmp_LOG_ERR, "gomiClientTable_handler: unknown column.\n");
+				netsnmp_set_request_error (reqinfo, request, SNMP_NOSUCHOBJECT);
+				break;
+			}
+		}
+		break;
+
+	default:
+		snmp_log (__netsnmp_LOG_ERR, "gomiClientTable_handler: unnsupported mode.\n");
+		break;
+	}
+	return SNMP_ERR_NOERROR;
+}
+
+/* Initialize the gomiClientPerformanceTable table by defining its contents and how it's structured
+*/
+static
+int
+initialize_table_gomiClientPerformanceTable(void)
+{
+	DLOG(INFO) << "initialize_table_gomiClientPerformanceTable()";
+
+	static const oid gomiClientPerformanceTable_oid[] = {1,3,6,1,4,1,67,3,2,6};
+	const size_t gomiClientPerformanceTable_oid_len = OID_LENGTH(gomiClientPerformanceTable_oid);
+	netsnmp_handler_registration* reg = nullptr;
+	netsnmp_iterator_info* iinfo = nullptr;
+	netsnmp_table_registration_info* table_info = nullptr;
+
+	reg = netsnmp_create_handler_registration (
+		"gomiClientPerformanceTable",   gomiClientPerformanceTable_handler,
+		gomiClientPerformanceTable_oid, gomiClientPerformanceTable_oid_len,
+		HANDLER_CAN_RONLY
+		);
+	if (nullptr == reg)
+		goto error;
+
+	table_info = SNMP_MALLOC_TYPEDEF (netsnmp_table_registration_info);
+	if (nullptr == table_info)
+		goto error;
+	netsnmp_table_helper_add_indexes (table_info,
+					  ASN_OCTET_STR,  /* index: gomiClientPerformancePluginId */
+					  ASN_UNSIGNED,  /* index: gomiClientPerformancePluginUniqueInstance */
+					  ASN_OCTET_STR,  /* index: gomiClientPerformanceUniqueInstance */
+					  0);
+	table_info->min_column = COLUMN_GOMICLIENTLASTACTIVITY;
+	table_info->max_column = COLUMN_GOMIOMMINACTIVECLIENTSESSIONEXCEPTION;
+    
+	iinfo = SNMP_MALLOC_TYPEDEF( netsnmp_iterator_info );
+	if (nullptr == iinfo)
+		goto error;
+	iinfo->get_first_data_point	= gomiClientPerformanceTable_get_first_data_point;
+	iinfo->get_next_data_point	= gomiClientPerformanceTable_get_next_data_point;
+	iinfo->free_loop_context_at_end = gomiClientPerformanceTable_free_loop_context;
+	iinfo->table_reginfo		= table_info;
+    
+	return netsnmp_register_table_iterator (reg, iinfo);
+
+error:
+	if (table_info && table_info->indexes)		/* table_data_free_func() is internal */
+		snmp_free_var (table_info->indexes);
+	SNMP_FREE (table_info);
+	SNMP_FREE (iinfo);
+	netsnmp_handler_registration_free (reg);
+	return -1;
+}
+
+/* Example iterator hook routines - using 'get_next' to do most of the work
+ */
+static
+netsnmp_variable_list*
+gomiClientPerformanceTable_get_first_data_point (
+	void**			my_loop_context,	/* valid through one query of multiple "data points" */
+	void**			my_data_context,	/* answer blob which is passed to handler() */
+	netsnmp_variable_list*	put_index_data,		/* answer */
+	netsnmp_iterator_info*	mydata			/* iinfo on init() */
+	)
+{
+	assert (nullptr != my_loop_context);
+	assert (nullptr != my_data_context);
+	assert (nullptr != put_index_data);
+	assert (nullptr != mydata);
+
+	DLOG(INFO) << "gomiClientPerformanceTable_get_first_data_point()";
+
+/* Create our own context for this SNMP loop, lock on list follows lifetime of context */
+	std::shared_ptr<snmp_context_t> context (new snmp_context_t (gomi::gomi_t::global_list_lock_, gomi::gomi_t::global_list_));
+	if (!(bool)context || context->gomi_list.empty()) {
+		DLOG(INFO) << "No plugin instances";
+		return nullptr;
+	}
+
+/* Find first node, through all plugin instances. */
+	for (context->gomi_it = context->gomi_list.begin();
+		context->gomi_it != context->gomi_list.end();
+		++(context->gomi_it))
+	{
+/* and through all sessions for each plugin provider. */
+		context->client_it = (*context->gomi_it)->provider_->clients_.begin();
+		if (context->client_it != (*context->gomi_it)->provider_->clients_.end()) {
+			break;
+		}
+	}
+
+/* no node found. */
+	if (context->client_it == (*context->gomi_it)->provider_->clients_.end()) {
+		DLOG(INFO) << "No client session instances.";
+		return nullptr;
+	}
+
+/* Save context with NET-SNMP iterator. */
+	*my_loop_context = context.get();
+	snmp_context_t::global_list.push_back (std::move (context));
+
+/* pass on for generic row access */
+	return gomiClientPerformanceTable_get_next_data_point(my_loop_context, my_data_context, put_index_data, mydata);
+}
+
+static
+netsnmp_variable_list*
+gomiClientPerformanceTable_get_next_data_point (
+	void**			my_loop_context,
+	void**			my_data_context,
+	netsnmp_variable_list*	put_index_data,
+	netsnmp_iterator_info*	mydata
+	)
+{
+	assert (nullptr != my_loop_context);
+	assert (nullptr != my_data_context);
+	assert (nullptr != put_index_data);
+	assert (nullptr != mydata);
+
+	DLOG(INFO) << "gomiClientPerformanceTable_get_next_data_point()";
+
+	snmp_context_t* context = static_cast<snmp_context_t*>(*my_loop_context);
+	netsnmp_variable_list *idx = put_index_data;
+
+/* end of data points */
+	if (context->gomi_it == context->gomi_list.end()) {
+		DLOG(INFO) << "End of plugin instances.";
+		return nullptr;
+	}
+	if (context->client_it == (*context->gomi_it)->provider_->clients_.end()) {
+		DLOG(INFO) << "End of client session instances.";
+		return nullptr;
+	}
+
+/* this plugin instance as a data point */
+	const gomi::client_t* client = (context->client_it->second).get();
+	const gomi::gomi_t* gomi = *context->gomi_it;
+
+/* gomiClientPerformancePluginId */
+	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)gomi->plugin_id_.c_str(), gomi->plugin_id_.length());
+        idx = idx->next_variable;
+
+/* gomiClientPerformancePluginUniqueInstance */
+	const unsigned instance = gomi->instance_;
+	snmp_set_var_typed_value (idx, ASN_UNSIGNED, (const u_char*)&instance, sizeof (instance));
+        idx = idx->next_variable;
+
+/* gomiClientPerformanceUniqueInstance */
+	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)client->prefix_.c_str(), client->prefix_.length() - 1);
+
+/* hunt for next valid node */
+	while (++(context->client_it) == (*context->gomi_it)->provider_->clients_.end()) {
+		if (++(context->gomi_it) == context->gomi_list.end()) {
+			break;
+		}
+		context->client_it = (*context->gomi_it)->provider_->clients_.begin();
+	}
+
+/* reference remains in list */
+        *my_data_context = (void*)client;
+	return put_index_data;
+}
+
+static
+void
+gomiClientPerformanceTable_free_loop_context (
+	void*			my_loop_context,
+	netsnmp_iterator_info*	mydata
+	)
+{
+	assert (nullptr != my_loop_context);
+	assert (nullptr != mydata);
+
+	DLOG(INFO) << "gomiClientPerformanceTable_free_loop_context()";
+
+/* delete context and shared lock on global list of all gomi objects */
+	snmp_context_t* context = static_cast<snmp_context_t*>(my_loop_context);
+/* I'm sure there must be a better method :-( */
+	snmp_context_t::global_list.erase (std::remove_if (snmp_context_t::global_list.begin(),
+		snmp_context_t::global_list.end(),
+		[context](std::shared_ptr<snmp_context_t>& shared_context) -> bool {
+			return shared_context.get() == context;
+	}));
+}
+
+/* handles requests for the gomiClientPerformanceTable table
+ */
+static
+int
+gomiClientPerformanceTable_handler (
+	netsnmp_mib_handler*		handler,
+	netsnmp_handler_registration*	reginfo,
+	netsnmp_agent_request_info*	reqinfo,
+	netsnmp_request_info*		requests
+	)
+{
+	assert (nullptr != handler);
+	assert (nullptr != reginfo);
+	assert (nullptr != reqinfo);
+	assert (nullptr != requests);
+
+	DLOG(INFO) << "gomiClientPerformanceTable_handler()";
+
+	switch (reqinfo->mode) {
+        
+/* Read-support (also covers GetNext requests) */
+
+	case MODE_GET:
+		for (netsnmp_request_info* request = requests;
+		     request;
+		     request = request->next)
+		{
+			const gomi::client_t* client = static_cast<gomi::client_t*>(netsnmp_extract_iterator_context (request));
+			if (nullptr == client) {
+				netsnmp_set_request_error (reqinfo, request, SNMP_NOSUCHINSTANCE);
+				continue;
+			}
+
+			netsnmp_variable_list* var = request->requestvb;
+			netsnmp_table_request_info* table_info  = netsnmp_extract_table_info (request);
+			if (nullptr == table_info) {
+				snmp_log (__netsnmp_LOG_ERR, "gomiClientPerformanceTable_handler: empty table request info.\n");
+				continue;
+			}
+    
+			switch (table_info->colnum) {
+
+			case COLUMN_GOMICLIENTLASTACTIVITY:
+				{
+					union {
+						uint32_t	uint_value;
+						__time32_t	time32_t_value;
+					} last_activity;
+					last_activity.time32_t_value = (client->last_activity_ - kUnixEpoch).total_seconds();
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&last_activity.uint_value, sizeof (last_activity.uint_value));
+				}
+				break;
+
+			case COLUMN_GOMICLIENTRFAMSGSSENT:
+				{
+					const unsigned rfa_msg_sent = client->cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&rfa_msg_sent, sizeof (rfa_msg_sent));
+				}
+				break;
+
+			case COLUMN_GOMIRFAEVENTSRECEIVED:
+				{
+					const unsigned rfa_events_received = client->cumulative_stats_[CLIENT_PC_RFA_EVENTS_RECEIVED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&rfa_events_received, sizeof (rfa_events_received));
+				}
+				break;
+
+			case COLUMN_GOMIRFAEVENTSDISCARDED:
+				{
+					const unsigned rfa_events_discarded = client->cumulative_stats_[CLIENT_PC_RFA_EVENTS_DISCARDED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&rfa_events_discarded, sizeof (rfa_events_discarded));
+				}
+				break;
+            
+			case COLUMN_GOMIOMMSOLICITEDITEMEVENTSRECEIVED:
+				{
+					const unsigned omm_item_events_received = client->cumulative_stats_[CLIENT_PC_OMM_SOLICITED_ITEM_EVENTS_RECEIVED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&omm_item_events_received, sizeof (omm_item_events_received));
+				}
+				break;
+
+			case COLUMN_GOMIOMMSOLICITEDITEMEVENTSDISCARDED:
+				{
+					const unsigned omm_item_events_discarded = client->cumulative_stats_[CLIENT_PC_OMM_SOLICITED_ITEM_EVENTS_DISCARDED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&omm_item_events_discarded, sizeof (omm_item_events_discarded));
+				}
+				break;
+
+			case COLUMN_GOMIREQUESTMSGSRECEIVED:
+				{
+					const unsigned response_msgs_received = client->cumulative_stats_[CLIENT_PC_REQUEST_MSGS_RECEIVED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&response_msgs_received, sizeof (response_msgs_received));
+				}
+				break;
+
+			case COLUMN_GOMIREQUESTMSGSDISCARDED:
+				{
+					const unsigned response_msgs_discarded = client->cumulative_stats_[CLIENT_PC_REQUEST_MSGS_DISCARDED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&response_msgs_discarded, sizeof (response_msgs_discarded));
+				}
+				break;
+
+			case COLUMN_GOMIMMTLOGINRECEIVED:
+				{
+					const unsigned login_received = client->cumulative_stats_[CLIENT_PC_MMT_LOGIN_RECEIVED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&login_received, sizeof (login_received));
+				}
+				break;
+
+			case COLUMN_GOMIMMTLOGINVALIDATED:
+				{
+					const unsigned login_validated = client->cumulative_stats_[CLIENT_PC_MMT_LOGIN_VALIDATED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&login_validated, sizeof (login_validated));
+				}
+				break;
+
+			case COLUMN_GOMIMMTLOGINMALFORMED:
+				{
+					const unsigned login_malformed = client->cumulative_stats_[CLIENT_PC_MMT_LOGIN_MALFORMED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&login_malformed, sizeof (login_malformed));
+				}
+				break;
+
+			case COLUMN_GOMIMMTLOGINREJECTED:
+				{
+					const unsigned login_rejected = client->cumulative_stats_[CLIENT_PC_MMT_LOGIN_REJECTED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&login_rejected, sizeof (login_rejected));
+				}
+				break;
+
+			case COLUMN_GOMIMMTLOGINACCEPTED:
+				{
+					const unsigned login_accepted = client->cumulative_stats_[CLIENT_PC_MMT_LOGIN_ACCEPTED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&login_accepted, sizeof (login_accepted));
+				}
+				break;
+
+			case COLUMN_GOMIMMTLOGINRESPONSEVALIDATED:
+				{
+					const unsigned response_validated = client->cumulative_stats_[CLIENT_PC_MMT_LOGIN_RESPONSE_VALIDATED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&response_validated, sizeof (response_validated));
+				}
+				break;
+
+			case COLUMN_GOMIMMTLOGINRESPONSEMALFORMED:
+				{
+					const unsigned response_malformed = client->cumulative_stats_[CLIENT_PC_MMT_LOGIN_RESPONSE_MALFORMED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&response_malformed, sizeof (response_malformed));
+				}
+				break;
+
+			case COLUMN_GOMIMMTLOGINEXCEPTION:
+				{
+					const unsigned exception_count = client->cumulative_stats_[CLIENT_PC_MMT_LOGIN_EXCEPTION];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&exception_count, sizeof (exception_count));
+				}
+				break;
+
+			case COLUMN_GOMIMMTDIRECTORYREQUESTRECEIVED:
+				{
+					const unsigned request_received = client->cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_REQUEST_RECEIVED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&request_received, sizeof (request_received));
+				}
+				break;
+
+			case COLUMN_GOMIMMTDIRECTORYREQUESTVALIDATED:
+				{
+					const unsigned request_validated = client->cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_REQUEST_VALIDATED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&request_validated, sizeof (request_validated));
+				}
+				break;
+
+			case COLUMN_GOMIMMTDIRECTORYREQUESTMALFORMED:
+				{
+					const unsigned request_malformed = client->cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_REQUEST_MALFORMED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&request_malformed, sizeof (request_malformed));
+				}
+				break;
+
+			case COLUMN_GOMIMMTDIRECTORYVALIDATED:
+				{
+					const unsigned directory_validated = client->cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_VALIDATED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&directory_validated, sizeof (directory_validated));
+				}
+				break;
+
+			case COLUMN_GOMIMMTDIRECTORYMALFORMED:
+				{
+					const unsigned directory_malformed = client->cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_MALFORMED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&directory_malformed, sizeof (directory_malformed));
+				}
+				break;
+
+			case COLUMN_GOMIMMTDIRECTORYSENT:
+				{
+					const unsigned directory_sent = client->cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_SENT];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&directory_sent, sizeof (directory_sent));
+				}
+				break;
+
+			case COLUMN_GOMIMMTDIRECTORYEXCEPTION:
+				{
+					const unsigned exception_count = client->cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_EXCEPTION];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&exception_count, sizeof (exception_count));
+				}
+				break;
+
+			case COLUMN_GOMIMMTDICTIONARYREQUESTRECEIVED:
+				{
+					const unsigned request_received = client->cumulative_stats_[CLIENT_PC_MMT_DICTIONARY_REQUEST_RECEIVED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&request_received, sizeof (request_received));
+				}
+				break;
+
+			case COLUMN_GOMIMMTDICTIONARYREQUESTVALIDATED:
+				{
+					const unsigned request_validated = client->cumulative_stats_[CLIENT_PC_MMT_DICTIONARY_REQUEST_VALIDATED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&request_validated, sizeof (request_validated));
+				}
+				break;
+
+			case COLUMN_GOMIMMTDICTIONARYREQUESTMALFORMED:
+				{
+					const unsigned request_malformed = client->cumulative_stats_[CLIENT_PC_MMT_DICTIONARY_REQUEST_MALFORMED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&request_malformed, sizeof (request_malformed));
+				}
+				break;
+
+			case COLUMN_GOMIITEMREQUESTRECEIVED:
+				{
+					const unsigned request_received = client->cumulative_stats_[CLIENT_PC_ITEM_REQUEST_RECEIVED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&request_received, sizeof (request_received));
+				}
+				break;
+
+			case COLUMN_GOMIITEMREISSUEREQUESTRECEIVED:
+				{
+					const unsigned reissue_received = client->cumulative_stats_[CLIENT_PC_ITEM_REISSUE_REQUEST_RECEIVED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&reissue_received, sizeof (reissue_received));
+				}
+				break;
+
+			case COLUMN_GOMIITEMCLOSEREQUESTRECEIVED:
+				{
+					const unsigned request_received = client->cumulative_stats_[CLIENT_PC_ITEM_CLOSE_REQUEST_RECEIVED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&request_received, sizeof (request_received));
+				}
+				break;
+
+			case COLUMN_GOMIITEMREQUESTMALFORMED:
+				{
+					const unsigned request_malformed = client->cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&request_malformed, sizeof (request_malformed));
+				}
+				break;
+
+			case COLUMN_GOMIITEMREQUESTBEFORELOGIN:
+				{
+					const unsigned noauth_request = client->cumulative_stats_[CLIENT_PC_ITEM_REQUEST_BEFORE_LOGIN];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&noauth_request, sizeof (noauth_request));
+				}
+				break;
+
+			case COLUMN_GOMIITEMDUPLICATESNAPSHOT:
+				{
+					const unsigned duplicate_snap = client->cumulative_stats_[CLIENT_PC_ITEM_DUPLICATE_SNAPSHOT];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&duplicate_snap, sizeof (duplicate_snap));
+				}
+				break;
+
+			case COLUMN_GOMIITEMREQUESTDISCARDED:
+				{
+					const unsigned request_discarded = client->cumulative_stats_[CLIENT_PC_ITEM_REQUEST_DISCARDED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&request_discarded, sizeof (request_discarded));
+				}
+				break;
+
+			case COLUMN_GOMIITEMREQUESTREJECTED:
+				{
+					const unsigned request_rejected = client->cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&request_rejected, sizeof (request_rejected));
+				}
+				break;
+
+			case COLUMN_GOMIITEMVALIDATED:
+				{
+					const unsigned item_validated = client->cumulative_stats_[CLIENT_PC_ITEM_VALIDATED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&item_validated, sizeof (item_validated));
+				}
+				break;
+
+			case COLUMN_GOMIITEMMALFORMED:
+				{
+					const unsigned item_malformed = client->cumulative_stats_[CLIENT_PC_ITEM_MALFORMED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&item_malformed, sizeof (item_malformed));
+				}
+				break;
+
+			case COLUMN_GOMIITEMNOTFOUND:
+				{
+					const unsigned item_not_found = client->cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&item_not_found, sizeof (item_not_found));
+				}
+				break;
+
+			case COLUMN_GOMIITEMSENT:
+				{
+					const unsigned item_sent = client->cumulative_stats_[CLIENT_PC_ITEM_SENT];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&item_sent, sizeof (item_sent));
+				}
+				break;
+
+			case COLUMN_GOMIITEMCLOSED:
+				{
+					const unsigned item_closed = client->cumulative_stats_[CLIENT_PC_ITEM_CLOSED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&item_closed, sizeof (item_closed));
+				}
+				break;
+
+			case COLUMN_GOMIITEMEXCEPTION:
+				{
+					const unsigned exception_count = client->cumulative_stats_[CLIENT_PC_ITEM_EXCEPTION];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&exception_count, sizeof (exception_count));
+				}
+				break;
+
+			case COLUMN_GOMIOMMINACTIVECLIENTSESSIONRECEIVED:
+				{
+					const unsigned inactive_sessions = client->cumulative_stats_[CLIENT_PC_OMM_INACTIVE_CLIENT_SESSION_RECEIVED];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&inactive_sessions, sizeof (inactive_sessions));
+				}
+				break;
+
+			case COLUMN_GOMIOMMINACTIVECLIENTSESSIONEXCEPTION:
+				{
+					const unsigned exception_count = client->cumulative_stats_[CLIENT_PC_OMM_INACTIVE_CLIENT_SESSION_EXCEPTION];
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&exception_count, sizeof (exception_count));
+				}
+				break;
+
+			default:
+				snmp_log (__netsnmp_LOG_ERR, "gomiClientPerformanceTable_handler: unknown column.\n");
+				netsnmp_set_request_error (reqinfo, request, SNMP_NOSUCHOBJECT);
+				break;
+			}
+		}
+		break;
+
+	default:
+		snmp_log (__netsnmp_LOG_ERR, "gomiClientPerformanceTable_handler: unsupported mode.\n");
 		break;
     }
 

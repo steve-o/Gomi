@@ -58,6 +58,9 @@ namespace gomi
 		CLIENT_PC_ITEM_REISSUE_REQUEST_RECEIVED,
 		CLIENT_PC_ITEM_CLOSE_REQUEST_RECEIVED,
 		CLIENT_PC_ITEM_REQUEST_MALFORMED,
+		CLIENT_PC_ITEM_REQUEST_BEFORE_LOGIN,
+		CLIENT_PC_ITEM_DUPLICATE_SNAPSHOT,
+		CLIENT_PC_ITEM_REQUEST_DISCARDED,
 		CLIENT_PC_ITEM_REQUEST_REJECTED,
 		CLIENT_PC_ITEM_VALIDATED,
 		CLIENT_PC_ITEM_MALFORMED,
@@ -80,7 +83,7 @@ namespace gomi
 		boost::noncopyable
 	{
 	public:
-		client_t (std::shared_ptr<provider_t> provider, const rfa::common::Handle* handle);
+		client_t (std::shared_ptr<provider_t> provider, const rfa::common::Handle* handle, const char* address);
 		~client_t();
 
 		bool GetAssociatedMetaInfo();
@@ -108,6 +111,7 @@ namespace gomi
 		void OnDirectoryRequest (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken*const token);
 		void OnDictionaryRequest (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken*const token);
 		void OnItemRequest (const rfa::message::ReqMsg& msg, rfa::sessionLayer::RequestToken*const token);
+		void OnItemSnapshotRequest (const rfa::message::ReqMsg&	msg, rfa::sessionLayer::RequestToken*const token);
 		void OnOMMItemEvent (const rfa::sessionLayer::OMMItemEvent& event);
                 void OnRespMsg (const rfa::message::RespMsg& msg);
                 void OnLoginResponse (const rfa::message::RespMsg& msg);
@@ -128,14 +132,15 @@ namespace gomi
 /* unique id per connection. */
 		std::string prefix_;
 
+/* client details. */
+		std::string address_;
+		std::string name_;
+
 /* RFA Client Session event consumer. */
 		rfa::common::Handle* handle_;
 
 /* RFA login token for closing out the Client Session. */
 		rfa::sessionLayer::RequestToken* login_token_;
-
-/* Watchlist of all items. */
-		boost::unordered_map<rfa::sessionLayer::RequestToken*const, std::weak_ptr<item_stream_t>> items_;
 
 /* Reuters Wire Format versions. */
 		uint8_t rwf_major_version_;
@@ -156,13 +161,13 @@ namespace gomi
 		uint32_t cumulative_stats_[CLIENT_PC_MAX];
 		uint32_t snap_stats_[CLIENT_PC_MAX];
 
-#ifdef STITCHMIB_H
-		friend Netsnmp_Next_Data_Point stitchClientTable_get_next_data_point;
-		friend Netsnmp_Node_Handler stitchClientTable_handler;
+#ifdef GOMIMIB_H
+		friend Netsnmp_Next_Data_Point gomiClientTable_get_next_data_point;
+		friend Netsnmp_Node_Handler gomiClientTable_handler;
 
-		friend Netsnmp_Next_Data_Point stitchClientPerformanceTable_get_next_data_point;
-		friend Netsnmp_Node_Handler stitchClientPerformanceTable_handler;
-#endif /* STITCHMIB_H */
+		friend Netsnmp_Next_Data_Point gomiClientPerformanceTable_get_next_data_point;
+		friend Netsnmp_Node_Handler gomiClientPerformanceTable_handler;
+#endif /* GOMIMIB_H */
 	};
 
 } /* namespace gomi */

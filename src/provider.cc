@@ -168,24 +168,37 @@ gomi::provider_t::Init()
 	return true;
 }
 
-/* Create an item stream for a given symbol name.  The Item Stream maintains
- * the provider state on behalf of the application.
- */
 bool
-gomi::provider_t::CreateItemStream (
-	const char* name,
-	std::shared_ptr<item_stream_t> item_stream
+gomi::provider_t::AddRequest (
+	rfa::sessionLayer::RequestToken*const token,
+	std::shared_ptr<gomi::client_t> client
 	)
 {
-	item_stream->rfa_name.set (name, 0, true);
-/* no tokens until subscription appears. */
-	const std::string key (name);
-	boost::unique_lock<boost::shared_mutex> lock (directory_lock_);
-	auto status = directory_.emplace (std::make_pair (key, item_stream));
-	VLOG(4) << "Creating item stream #" << directory_.size() << " for RIC \"" << name << "\".";
-	assert (true == status.second);
-	assert (directory_.end() != directory_.find (key));
-	last_activity_ = boost::posix_time::second_clock::universal_time();
+	DCHECK((bool)client);
+/* read lock to find */
+	boost::upgrade_lock<boost::shared_mutex> requests_lock (requests_lock_);
+	auto it = requests_.find (token);
+	if (requests_.end() != it)
+		return false;
+/* write lock for updating requests map */
+	boost::upgrade_to_unique_lock<boost::shared_mutex> unique_requests_lock (requests_lock);
+	requests_.emplace (std::make_pair (token, client));
+	return true;
+}
+
+bool
+gomi::provider_t::RemoveRequest (
+	rfa::sessionLayer::RequestToken*const token
+	)
+{
+/* read lock to find */
+	boost::upgrade_lock<boost::shared_mutex> requests_lock (requests_lock_);
+	auto it = requests_.find (token);
+	if (requests_.end() == it)
+		return false;
+/* write lock to remove */
+	boost::upgrade_to_unique_lock<boost::shared_mutex> unique_requests_lock (requests_lock);
+	requests_.erase (it);
 	return true;
 }
 
@@ -202,40 +215,20 @@ gomi::provider_t::SendReply (
 	auto it = requests_.find (token);
 	if (requests_.end() == it)
 		return false;
-	auto request = it->second.lock();	// weak_ptr for request_t
-	if (!(bool)request)
-		return false;
-	auto stream = request->item_stream.lock();	// weak_ptr for item_stream_t
-	if (!(bool)stream)
-		return false;
-	auto client = request->client.lock();	// weak_ptr for client_t;
+	auto client = it->second.lock();	// weak_ptr for client_t
 	if (!(bool)client)
 		return false;
-/* lock updates for this stream */
-	boost::upgrade_lock<boost::shared_mutex> stream_lock (stream->lock);
+	{
+/* immediately remove from watch list as only snapshot */
+		boost::upgrade_to_unique_lock<boost::shared_mutex> unique_requests_lock (requests_lock);
+		requests_.erase (it);
+	}
+	requests_lock.unlock();
 /* forward refresh image */
 	Submit (msg, token, nullptr);
 	cumulative_stats_[PROVIDER_PC_MSGS_SENT]++;
 	client->cumulative_stats_[CLIENT_PC_RFA_MSGS_SENT]++;
 	client->last_activity_ = last_activity_ = boost::posix_time::second_clock::universal_time();
-	if (request->is_streaming)
-	{
-/* enable updates for this request */
-		request->has_initial_image.store (true);
-	}
-	else
-	{
-/* from providers watchlist */
-		boost::upgrade_to_unique_lock<boost::shared_mutex> unique_requests_lock (requests_lock);
-		requests_.erase (it);
-/* from items watchlist */
-		auto stream_it = stream->requests.find (token);
-		DCHECK (stream_it != stream->requests.end());
-		boost::upgrade_to_unique_lock<boost::shared_mutex> unique_stream_lock (stream_lock);
-		stream->requests.erase (stream_it);
-/* no client watchlist for snapshot */
-	}
-/* unlock */
 	return true;
 }
 
@@ -312,10 +305,12 @@ gomi::provider_t::OnOMMActiveClientSessionEvent (
 {
 	cumulative_stats_[PROVIDER_PC_OMM_ACTIVE_CLIENT_SESSION_RECEIVED]++;
 	try {
-		if (!is_accepting_connections_ || clients_.size() == config_.session_capacity)
-			RejectClientSession (session_event.getClientSessionHandle());
+		auto handle = session_event.getClientSessionHandle();
+		auto address = session_event.getClientIPAddress();
+		if (!is_accepting_connections_ || clients_.size() == config_.sessions[0].session_capacity)
+			RejectClientSession (handle, address.c_str());
 		else
-			AcceptClientSession (session_event.getClientSessionHandle());
+			AcceptClientSession (handle, address.c_str());
 /* ignore any error */
 	} catch (rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[PROVIDER_PC_OMM_ACTIVE_CLIENT_SESSION_EXCEPTION]++;
@@ -327,10 +322,11 @@ gomi::provider_t::OnOMMActiveClientSessionEvent (
 
 bool
 gomi::provider_t::RejectClientSession (
-	const rfa::common::Handle* handle
+	const rfa::common::Handle* handle,
+	const char* address
 	)
 {
-	VLOG(2) << "Rejecting new client session request.";
+	VLOG(2) << "Rejecting new client session request: { \"Address\": \"" << address << "\" }";
 		
 /* 7.4.10.2 Closing down a client session. */
 	rfa::sessionLayer::OMMClientSessionCmd rejectCmd;
@@ -347,12 +343,13 @@ gomi::provider_t::RejectClientSession (
 
 bool
 gomi::provider_t::AcceptClientSession (
-	const rfa::common::Handle* handle
+	const rfa::common::Handle* handle,
+	const char* address
 	)
 {
-	VLOG(2) << "Accepting new client session request.";
+	VLOG(2) << "Accepting new client session request: { \"Address\": \"" << address << "\" }";
 
-	auto client = std::make_shared<client_t> (shared_from_this(), handle);
+	auto client = std::make_shared<client_t> (shared_from_this(), handle, address);
 	if (!(bool)client)
 		return false;
 

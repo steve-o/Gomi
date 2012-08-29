@@ -54,8 +54,7 @@
      is not defined underneath the key.
 
   -->
-	<Rfa maximumDataSize="8192"
-	     sessionCapacity="2">
+	<Rfa maximumDataSize="8192">
 
 <!-- TREP-RT service name this plugin provides, compare to IDN_RDF or IDN_SELECTFEED. -->
 		<service name="VTA"/>
@@ -65,9 +64,9 @@
      As an-interactive provider the TCP connection will be initiated by the client.
 
   -->
-		<session name="SESSION">
+		<session name="SESSION" capacity="2">
 			<publisher name="PUBLISHER"/>		<!-- Name used for logging. -->
-			<connection name="CONNECTION" defaultPort="14002"/>
+			<connection name="CONNECTION" port="14002"/>
 			</connection>
 		</session>
 
@@ -83,11 +82,10 @@
   -->
 	<Gomi
 		workerCount="1"
-		interval="600"
 		symbolmap="C:/Vhayu/Config/symbolmap.txt"
 		suffix="=VTA"
 		TZDB="C:/Vhayu/Config/date_time_zonespec.csv"
-		TZ=”America/New_York”
+		TZ="America/New_York"
 		dayCount="20">
 
 		<fields>
@@ -105,297 +103,7 @@
 				<fid name="PCTCHG_15T" value="91"/>
 				<fid name="PCTCHG_20T" value="92"/>
 			</archive>
-			<realtime>
-				<bin name="OPEN">
-					<fid name="VMA"        value="64"/>
-					<fid name="NZERO_VMA"  value="84"/>
-					<fid name="NUM_MOVES"  value="106"/>
-					<fid name="NM_HIGH"    value="189"/>
-					<fid name="NM_LOW"     value="289"/>
-					<fid name="NM_SMALL"   value="377"/>
-					<fid name="PCTCHG_10D" value="19"/>
-					<fid name="PCTCHG_15D" value="21"/>
-					<fid name="PCTCHG_20D" value="34"/>
-					<fid name="PCTCHG_10T" value="93"/>
-					<fid name="PCTCHG_15T" value="94"/>
-					<fid name="PCTCHG_20T" value="95"/>
-				</bin>
-				<bin name="OPEN2">
-					<fid name="VMA"        value="65"/>
-					<fid name="NZERO_VMA"  value="85"/>
-					<fid name="NUM_MOVES"  value="108"/>
-					<fid name="NM_HIGH"    value="190"/>
-					<fid name="NM_LOW"     value="299"/>
-					<fid name="NM_SMALL"   value="383"/>
-					<fid name="PCTCHG_10D" value="35"/>
-					<fid name="PCTCHG_15D" value="36"/>
-					<fid name="PCTCHG_20D" value="47"/>
-					<fid name="PCTCHG_10T" value="98"/>
-					<fid name="PCTCHG_15T" value="100"/>
-					<fid name="PCTCHG_20T" value="114"/>
-				</bin>
-				<bin name="CLOSE">
-					<fid name="VMA"        value="77"/>
-					<fid name="NZERO_VMA"  value="86"/>
-					<fid name="NUM_MOVES"  value="116"/>
-					<fid name="NM_HIGH"    value="191"/>
-					<fid name="NM_LOW"     value="300"/>
-					<fid name="NM_SMALL"   value="401"/>
-					<fid name="PCTCHG_10D" value="48"/>
-					<fid name="PCTCHG_15D" value="50"/>
-					<fid name="PCTCHG_20D" value="51"/>
-					<fid name="PCTCHG_10T" value="120"/>
-					<fid name="PCTCHG_15T" value="121"/>
-					<fid name="PCTCHG_20T" value="122"/>
-				</bin>
-				<bin name="CLOSE2">
-					<fid name="VMA"        value="80"/>
-					<fid name="NZERO_VMA"  value="87"/>
-					<fid name="NUM_MOVES"  value="183"/>
-					<fid name="NM_HIGH"    value="192"/>
-					<fid name="NM_LOW"     value="301"/>
-					<fid name="NM_SMALL"   value="402"/>
-					<fid name="PCTCHG_10D" value="56"/>
-					<fid name="PCTCHG_15D" value="57"/>
-					<fid name="PCTCHG_20D" value="59"/>
-					<fid name="PCTCHG_10T" value="123"/>
-					<fid name="PCTCHG_15T" value="124"/>
-					<fid name="PCTCHG_20T" value="125"/>
-				</bin>
-				<bin name="FIRST">
-					<fid name="VMA"        value="81"/>
-					<fid name="NZERO_VMA"  value="88"/>
-					<fid name="NUM_MOVES"  value="184"/>
-					<fid name="NM_HIGH"    value="193"/>
-					<fid name="NM_LOW"     value="302"/>
-					<fid name="NM_SMALL"   value="403"/>
-					<fid name="PCTCHG_10D" value="60"/>
-					<fid name="PCTCHG_15D" value="61"/>
-					<fid name="PCTCHG_20D" value="62"/>
-					<fid name="PCTCHG_10T" value="126"/>
-					<fid name="PCTCHG_15T" value="127"/>
-					<fid name="PCTCHG_20T" value="128"/>
-				</bin>
-				<bin name="LAST">
-					<fid name="VMA"        value="82"/>
-					<fid name="NZERO_VMA"  value="89"/>
-					<fid name="NUM_MOVES"  value="187"/>
-					<fid name="NM_HIGH"    value="194"/>
-					<fid name="NM_LOW"     value="368"/>
-					<fid name="NM_SMALL"   value="404"/>
-					<fid name="PCTCHG_10D" value="63"/>
-					<fid name="PCTCHG_15D" value="66"/>
-					<fid name="PCTCHG_20D" value="69"/>
-					<fid name="PCTCHG_10T" value="129"/>
-					<fid name="PCTCHG_15T" value="130"/>
-					<fid name="PCTCHG_20T" value="132"/>
-				</bin>
-				<bin name="10MIN">
-					<fid name="VMA"        value="83"/>
-					<fid name="NZERO_VMA"  value="101"/>
-					<fid name="NUM_MOVES"  value="188"/>
-					<fid name="NM_HIGH"    value="211"/>
-					<fid name="NM_LOW"     value="373"/>
-					<fid name="NM_SMALL"   value="405"/>
-					<fid name="PCTCHG_10D" value="70"/>
-					<fid name="PCTCHG_15D" value="71"/>
-					<fid name="PCTCHG_20D" value="75"/>
-					<fid name="PCTCHG_10T" value="134"/>
-					<fid name="PCTCHG_15T" value="135"/>
-					<fid name="PCTCHG_20T" value="136"/>
-				</bin>
-			</realtime>
 		</fields>
-
-		<bins>
-			<bin name="OPEN">
-				<time>9:30</time>
-				<time>9:40</time>
-			</bin>
-<!-- OPEN + pre-market -->
-			<bin name="OPEN2">
-				<time>4:00</time>
-				<time>9:40</time>
-			</bin>
-			<bin name="CLOSE">
-				<time>16:00</time>
-				<time>16:10</time>
-			</bin>
-<!-- CLOSE + post-market -->
-			<bin name="CLOSE2">
-				<time>16:00</time>
-				<time>20:00</time>
-			</bin>
-<!-- First hour of trading -->
-			<bin name="FIRST">
-				<time>9:30</time>
-				<time>10:30</time>
-			</bin>
-<!-- Last hour of trading -->
-			<bin name="LAST">
-				<time>15:00</time>
-				<time>16:10</time>
-			</bin>
-
-<!-- 10 minute bins -->
-	                <bin name="0940">
-	                        <time>9:30</time>
-	                        <time>9:40</time>
-	                </bin>
-	                <bin name="0950">
-	                        <time>9:40</time>
-	                        <time>9:50</time>
-	                </bin>
-	                <bin name="1000">
-	                        <time>9:50</time>
-	                        <time>10:00</time>
-	                </bin>
-	                <bin name="1010">
-	                        <time>10:00</time>
-	                        <time>10:10</time>
-	                </bin>
-	                <bin name="1020">
-	                        <time>10:10</time>
-	                        <time>10:20</time>
-	                </bin>
-			<bin name="1030">
-	                        <time>10:20</time>
-	                        <time>10:30</time>
-	        	        </bin>
-	                <bin name="1040">
-	                        <time>10:30</time>
-	                        <time>10:40</time>
-	                </bin>
-	                <bin name="1050">
-	                        <time>10:40</time>
-	                        <time>10:50</time>
-	                </bin>
-	                <bin name="1100">
-	                        <time>10:50</time>
-	                        <time>11:00</time>
-	                </bin>
-	                <bin name="1110">
-	                        <time>11:00</time>
-	                        <time>11:10</time>
-	                </bin>
-	                <bin name="1120">
-	                        <time>11:10</time>
-	                        <time>11:20</time>
-	                </bin>
-	                <bin name="1130">
-	                        <time>11:20</time>
-	                        <time>11:30</time>
-	                </bin>
-	                <bin name="1140">
-	                        <time>11:30</time>
-	                        <time>11:40</time>
-	                </bin>
-	                <bin name="1150">
-	                        <time>11:40</time>
-	                        <time>11:50</time>
-	                </bin>
-	                <bin name="1200">
-	                        <time>11:50</time>
-	                        <time>12:00</time>
-	                </bin>
-	                <bin name="1210">
-	                        <time>12:00</time>
-	                        <time>12:10</time>
-	                </bin>
-	                <bin name="1220">
-				<time>12:10</time>
-	                        <time>12:20</time>
-	                </bin>
-	                <bin name="1230">
-	                        <time>12:20</time>
-	                        <time>12:30</time>
-	                </bin>
-        	        <bin name="1240">
-	                        <time>12:30</time>
-	                        <time>12:40</time>
-	                </bin>
-	                <bin name="1250">
-	                        <time>12:40</time>
-	                        <time>12:50</time>
-	                </bin>
-	                <bin name="1300">
-	                        <time>12:50</time>
-	                        <time>13:00</time>
-	                </bin>
-	                <bin name="1310">
-	                        <time>13:00</time>
-	                        <time>13:10</time>
-	                </bin>
-	                <bin name="1320">
-	                        <time>13:10</time>
-	                        <time>13:20</time>
-	                </bin>
-	                <bin name="1330">
-	                        <time>13:20</time>
-	                        <time>13:30</time>
-	                </bin>
-	                <bin name="1340">
-	                        <time>13:30</time>
-	                        <time>13:40</time>
-	                </bin>
-	                <bin name="1350">
-	                        <time>13:40</time>
-	                        <time>13:50</time>
-	                </bin>
-	                <bin name="1400">
-	                        <time>13:50</time>
-	                        <time>14:00</time>
-	                </bin>
-	                <bin name="1410">
-	                        <time>14:00</time>
-	                        <time>14:10</time>
-	                </bin>
-	                <bin name="1420">
-	                        <time>14:10</time>
-	                        <time>14:20</time>
-	                </bin>
-	                <bin name="1430">
-	                        <time>14:20</time>
-	                        <time>14:30</time>
-	                </bin>
-	                <bin name="1440">
-	                        <time>14:30</time>
-	                        <time>14:40</time>
-	                </bin>
-	                <bin name="1450">
-	                        <time>14:40</time>
-	                        <time>14:50</time>
-	                </bin>
-	                <bin name="1500">
-	                        <time>14:50</time>
-	                        <time>15:00</time>
-	                </bin>
-	                <bin name="1510">
-	                        <time>15:00</time>
-	                        <time>15:10</time>
-	                </bin>
-	                <bin name="1520">
-	                        <time>15:10</time>
-	                        <time>15:20</time>
-	                </bin>
-	                <bin name="1530">
-	                        <time>15:20</time>
-	                        <time>15:30</time>
-	                </bin>
-	                <bin name="1540">
-	                        <time>15:30</time>
-	                        <time>15:40</time>
-	                </bin>
-	                <bin name="1550">
-	                        <time>15:40</time>
-	                        <time>15:50</time>
-	                </bin>
-	                <bin name="1600">
-	                        <time>15:50</time>
-	                        <time>16:00</time>
-	                </bin>
-			
-		</bins>
 	</Gomi>
 
 </config>

@@ -50,6 +50,14 @@ gomi::config_t::validate()
 			LOG(ERROR) << "Undefined publisher name for <session name=\"" << it->session_name << "\">.";
 			return false;
 		}
+		if (it->rssl_port.empty()) {
+			LOG(ERROR) << "Undefined RSSL port for <session name=\"" << it->session_name << "\">.";
+			return false;
+		}
+		if (0 == it->session_capacity) {
+			LOG(ERROR) << "Undefined session capacity for <session name=\"" << it->session_name << "\">.";
+			return false;
+		}
 	}
 	if (monitor_name.empty()) {
 		LOG(ERROR) << "Undefined monitor name.";
@@ -69,21 +77,8 @@ gomi::config_t::validate()
 		LOG(ERROR) << "Invalid maximum data size \"" << maximum_data_size << "\".";
 		return false;
 	}
-	if (0 == session_capacity) {
-		LOG(ERROR) << "Invalid session capacity \"" << session_capacity << "\".";
-		return false;
-	}
 	if (0 == worker_count) {
 		LOG(ERROR) << "Invalid worker count \"" << worker_count << "\".";
-		return false;
-	}
-
-	if (interval.empty()) {
-		LOG(ERROR) << "Undefined interval.";
-		return false;
-	}
-	if (symbolmap.empty()) {
-		LOG(ERROR) << "Undefined symbol map.";
 		return false;
 	}
 	if (tz.empty()) {
@@ -94,8 +89,8 @@ gomi::config_t::validate()
 		LOG(ERROR) << "Undefined time zone database.";
 		return false;
 	}
-	if (day_count.empty()) {
-		LOG(ERROR) << "Undefined default analytic time period.";
+	if (0 == day_count) {
+		LOG(ERROR) << "Invalid default analytic time period.";
 		return false;
 	}
 	if (!archive_fids.RdmAverageVolumeId ||
@@ -112,34 +107,6 @@ gomi::config_t::validate()
 	    !archive_fids.Rdm20TradingDayPercentChangeId )
 	{
 		LOG(ERROR) << "Undefined archive FID set.";
-		return false;
-	}
-	if (realtime_fids.empty()) {
-		LOG(ERROR) << "Undefined realtime FID list.";
-		return false;
-	}
-	for (auto it = realtime_fids.begin(); it != realtime_fids.end(); ++it)
-	{
-		if (it->first.empty() ||
-		    !it->second.RdmAverageVolumeId ||
-		    !it->second.RdmAverageNonZeroVolumeId ||
-		    !it->second.RdmTotalMovesId ||
-		    !it->second.RdmMaximumMovesId ||
-		    !it->second.RdmMinimumMovesId ||
-		    !it->second.RdmSmallestMovesId ||
-		    !it->second.Rdm10DayPercentChangeId ||
-		    !it->second.Rdm15DayPercentChangeId ||
-		    !it->second.Rdm20DayPercentChangeId ||
-		    !it->second.Rdm10TradingDayPercentChangeId ||
-		    !it->second.Rdm15TradingDayPercentChangeId ||
-		    !it->second.Rdm20TradingDayPercentChangeId)
-		{
-			LOG(ERROR) << "Undefined realtime FID set.";
-			return false;
-		}
-	}
-	if (bins.empty()) {
-		LOG(ERROR) << "Undefined bin list.";
 		return false;
 	}
 	return true;
@@ -289,11 +256,6 @@ gomi::config_t::parseRfaNode (
 	if (!attr.empty())
 		maximum_data_size = (size_t)std::atol (attr.c_str());
 
-/* sessionCapacity="count" */
-	attr = xml.transcode (elem->getAttribute (L"sessionCapacity"));
-	if (!attr.empty())
-		session_capacity = (unsigned)std::atol (attr.c_str());
-
 /* <service> */
 	nodeList = elem->getElementsByTagName (L"service");
 	for (int i = 0; i < nodeList->getLength(); i++) {
@@ -373,6 +335,7 @@ gomi::config_t::parseSessionNode (
 	const DOMElement* elem = static_cast<const DOMElement*>(node);
 	vpf::XMLStringPool xml;
 	const DOMNodeList* nodeList;
+	std::string attr;
 	session_config_t session;
 
 /* name="name" */
@@ -381,6 +344,14 @@ gomi::config_t::parseSessionNode (
 		LOG(ERROR) << "Undefined \"name\" attribute, value cannot be empty.";
 		return false;
 	}
+
+/* capacity="count" */
+	attr = xml.transcode (elem->getAttribute (L"capacity"));
+	if (attr.empty()) {
+		LOG(ERROR) << "Undefined \"capacity\" attribute, value cannot be empty or 0.";
+		return false;
+	}
+	session.session_capacity = (unsigned)std::atol (attr.c_str());
 
 /* <publisher> */
 	nodeList = elem->getElementsByTagName (L"publisher");
@@ -422,8 +393,8 @@ gomi::config_t::parseConnectionNode (
 		LOG(ERROR) << "Undefined \"name\" attribute, value cannot be empty.";
 		return false;
 	}
-/* defaultPort="port" */
-	session.rssl_default_port = xml.transcode (elem->getAttribute (L"defaultPort"));
+/* port="port" */
+	session.rssl_port = xml.transcode (elem->getAttribute (L"port"));
 	return true;
 }
 
@@ -506,18 +477,6 @@ gomi::config_t::parseGomiNode (
 	attr = xml.transcode (elem->getAttribute (L"workerCount"));
 	if (!attr.empty())
 		worker_count = (unsigned)std::atol (attr.c_str());
-/* interval="seconds" */
-	attr = xml.transcode (elem->getAttribute (L"interval"));
-	if (!attr.empty())
-		interval = attr;
-/* tolerableDelay="milliseconds" */
-	attr = xml.transcode (elem->getAttribute (L"tolerableDelay"));
-	if (!attr.empty())
-		tolerable_delay = attr;
-/* symbolmap="file" */
-	attr = xml.transcode (elem->getAttribute (L"symbolmap"));
-	if (!attr.empty())
-		symbolmap = attr;
 /* suffix="text" */
 	attr = xml.transcode (elem->getAttribute (L"suffix"));
 	if (!attr.empty())
@@ -533,12 +492,10 @@ gomi::config_t::parseGomiNode (
 /* dayCount="days" */
 	attr = xml.transcode (elem->getAttribute (L"dayCount"));
 	if (!attr.empty())
-		day_count = attr;
+		day_count = (unsigned)std::atol (attr.c_str());
 
 /* reset all lists */
 	ZeroMemory (&archive_fids, sizeof (archive_fids));
-	realtime_fids.clear();
-	bins.clear();
 /* <fields> */
 	nodeList = elem->getElementsByTagName (L"fields");
 	for (int i = 0; i < nodeList->getLength(); i++) {
@@ -549,16 +506,6 @@ gomi::config_t::parseGomiNode (
 	}
 	if (0 == nodeList->getLength())
 		LOG(WARNING) << "No <fields> nodes found.";
-/* <bins> */
-	nodeList = elem->getElementsByTagName (L"bins");
-	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseBinsNode (nodeList->item (i))) {
-			LOG(ERROR) << "Failed parsing <bins> nth-node #" << (1 + i) << ".";
-			return false;
-		}
-	}
-	if (0 == nodeList->getLength())
-		LOG(WARNING) << "No <bins> nodes found.";
 	return true;
 }
 
@@ -581,16 +528,6 @@ gomi::config_t::parseFieldsNode (
 	}
 	if (0 == nodeList->getLength())
 		LOG(WARNING) << "No <archive> nodes found.";
-/* <realtime> */
-	nodeList = elem->getElementsByTagName (L"realtime");
-	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseRealtimeNode (nodeList->item (i))) {
-			LOG(ERROR) << "Failed parsing <realtime> nth-node #" << (1 + i) << ".";
-			return false;
-		}
-	}
-	if (0 == nodeList->getLength())
-		LOG(WARNING) << "No <realtime> nodes found.";
 	return true;
 }
 
@@ -673,173 +610,7 @@ gomi::config_t::parseFidNode (
 	return true;
 }
 
-/* <realtime> */
-bool
-gomi::config_t::parseRealtimeNode (
-	const DOMNode*		node
-	)
-{
-	const DOMElement* elem = static_cast<const DOMElement*>(node);
-	const DOMNodeList* nodeList;
-
-/* <bin> */
-	nodeList = elem->getElementsByTagName (L"bin");
-	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseRealtimeBinNode (nodeList->item (i))) {
-			LOG(ERROR) << "Failed parsing <bin> nth-node #" << (1 + i) << ".";
-			return false;
-		}
-	}
-	if (0 == nodeList->getLength())
-		LOG(WARNING) << "No <bin> nodes found.";
-	return true;
-}
-
-/* <realtime><bin> */
-bool
-gomi::config_t::parseRealtimeBinNode (
-	const DOMNode*		node
-	)
-{
-	const DOMElement* elem = static_cast<const DOMElement*>(node);
-	vpf::XMLStringPool xml;
-	const DOMNodeList* nodeList;
-
-/* name="bin name" */
-	const std::string name = xml.transcode (elem->getAttribute (L"name"));
-	if (name.empty()) {
-		LOG(ERROR) << "Undefined \"name\" attribute, value cannot be empty.";
-		return false;
-	}
-
-/* <fid> */
-	fidset_t fidset;
-	nodeList = elem->getElementsByTagName (L"fid");
-	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseFidNode (nodeList->item (i), fidset)) {
-			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
-			LOG(ERROR) << "Failed parsing <fid> nth-node #" << (1 + i) << ": \"" << text_content << "\".";
-			return false;
-		}
-	}
-	if (0 == nodeList->getLength())
-		LOG(WARNING) << "No <fid> nodes found.";
-	realtime_fids.emplace (std::make_pair (name, fidset));
-	return true;
-}
-
-/* <bins> */
-bool
-gomi::config_t::parseBinsNode (
-	const DOMNode*		node
-	)
-{
-	const DOMElement* elem = static_cast<const DOMElement*>(node);
-	vpf::XMLStringPool xml;
-	const DOMNodeList* nodeList;
-
-/* <bin> */
-	nodeList = elem->getElementsByTagName (L"bin");
-	for (int i = 0; i < nodeList->getLength(); i++) {
-		std::string bin;
-		if (!parseBinNode (nodeList->item (i), bin)) {
-			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
-			LOG(ERROR) << "Failed parsing <bin> nth-node #" << (1 + i) << ": \"" << text_content << "\".";
-			return false;
-		}
-		bins.push_back (bin);
-	}
-	if (0 == nodeList->getLength())
-		LOG(WARNING) << "No <bin> nodes found.";
-	return true;
-}
-
-/* Convert Xml node from:
- *
- *	<bin name="OPEN">
- *		<time>09:00</time>
- *		<time>09:33</time>
- *	</bin>
- *
- * into:
- *
- *	"OPEN=09:00-09:33"
- */
-
-bool
-gomi::config_t::parseBinNode (
-	const DOMNode*		node,
-	std::string&		bin
-	)
-{
-	const DOMElement* elem = static_cast<const DOMElement*>(node);
-	vpf::XMLStringPool xml;
-	const DOMNodeList* nodeList;
-
-	if (!elem->hasAttributes()) {
-		LOG(ERROR) << "No attributes found, a \"name\" attribute is required.";
-		return false;
-	}
-	if (!elem->hasChildNodes()) {
-		LOG(ERROR) << "No child nodes found, two <time> nodes are required.";
-		return false;
-	}
-
-/* name="suffix" */
-	const std::string name = xml.transcode (elem->getAttribute (L"name"));
-	if (name.empty()) {
-		LOG(ERROR) << "Undefined \"name\" attribute, value cannot be empty.";
-		return false;
-	}
-
-	nodeList = elem->getElementsByTagName (L"time");
-	if (2 != nodeList->getLength()) {
-		LOG(ERROR) << "Two <time> child nodes are required.";
-		return false;
-	}
-
-	std::string time[2];
-	for (unsigned i = 0; i < 2; ++i) {
-		if (!parseTimeNode (nodeList->item (i), time[i])) {
-			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
-			LOG(ERROR) << "Failed parsing <time> nth-node #" << (1 + i) << ": \"" << text_content << "\".";
-			return false;
-		}
-	}
-
-	std::ostringstream os;
-	os << name << '=' << time[0] << '-' << time[1];
-
-	bin = os.str();
-
-	return true;
-}
-
-/* Convert Xml node from:
- *
- *	<time>09:00</time>
- *
- * into:
- *
- *	"09:00"
- */
-
-bool
-gomi::config_t::parseTimeNode (
-	const DOMNode*		node,
-	std::string&		time
-	)
-{
-	const DOMElement* elem = static_cast<const DOMElement*>(node);
-	vpf::XMLStringPool xml;
-
-	time = xml.transcode (elem->getTextContent());
-
-	return true;
-}
-
 /* </Gomi> */
 /* </config> */
 
 /* eof */
-

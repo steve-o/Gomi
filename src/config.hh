@@ -28,7 +28,10 @@ namespace gomi
 		std::string publisher_name;
 
 //  Default TREP-RT RSSL port, e.g. 14002 (interactive), 14003 (non-interactive).
-		std::string rssl_default_port;
+		std::string rssl_port;
+
+//  Client session capacity.
+		unsigned session_capacity;
 	};
 
 	struct fidset_t
@@ -121,43 +124,23 @@ namespace gomi
 //  RFA maximum data buffer size for SingleWriteIterator.
 		size_t maximum_data_size;
 
-//  Client session capacity.
-		unsigned session_capacity;
-
 //  Count of request worker threads.
 		unsigned worker_count;
-
-//  Time quantum interval in seconds for checking bin boundaries.
-		std::string interval;
-
-//  Windows timer coalescing tolerable delay.
-//  At least 32ms, corresponding to two 15.6ms platform timer interrupts.
-//  Appropriate values are 10% to timer period.
-//  Specify tolerable delay values and timer periods in multiples of 50 ms.
-//  http://www.microsoft.com/whdc/system/pnppwr/powermgmt/TimerCoal.mspx
-		std::string tolerable_delay;
 
 //  RFA symbol name suffix for every publish.
 		std::string suffix;
 
-//  File path for symbol list a.k.a symbolmap.
-		std::string symbolmap;
-
 //  File path for time zone database that Boost::DateTimes likes.
 		std::string tzdb;
 
-//  Local time zone.
+//  Default time zone.
 		std::string tz;
 
 //  Default analytic time period
-		std::string day_count;
+		unsigned day_count;
 
-//  FIDs for archival and realtime records.
+//  FIDs for archival records.
 		fidset_t archive_fids;
-		std::map<std::string, fidset_t> realtime_fids;
-
-//  Bin definitions.
-		std::vector<std::string> bins;
 	};
 
 	inline
@@ -166,7 +149,8 @@ namespace gomi
 			  "\"session_name\": \"" << session.session_name << "\""
 			", \"connection_name\": \"" << session.connection_name << "\""
 			", \"publisher_name\": \"" << session.publisher_name << "\""
-			", \"rssl_default_port\": \"" << session.rssl_default_port << "\""
+			", \"rssl_port\": \"" << session.rssl_port << "\""
+			", \"session_capacity\": " << session.session_capacity << 
 			" }";
 		return o;
 	}
@@ -212,35 +196,13 @@ namespace gomi
 			", \"event_queue_name\": \"" << config.event_queue_name << "\""
 			", \"vendor_name\": \"" << config.vendor_name << "\""
 			", \"maximum_data_size\": " << config.maximum_data_size <<
-			", \"session_capacity\": " << config.session_capacity << 
 			", \"worker_count\": " << config.worker_count << 
-			", \"interval\": \"" << config.interval << "\""
-			", \"tolerable_delay\": \"" << config.tolerable_delay << "\""
 			", \"suffix\": \"" << config.suffix << "\""
-			", \"symbolmap\": \"" << config.symbolmap << "\""
 			", \"tz\": \"" << config.tz << "\""
 			", \"tzdb\": \"" << config.tzdb << "\""
-			", \"day_count\": \"" << config.day_count << "\""
+			", \"day_count\": " << config.day_count <<
 			", \"archive_fids\": " << config.archive_fids <<
-			", \"realtime_fids\": { ";
-		for (auto it = config.realtime_fids.begin();
-			it != config.realtime_fids.end();
-			++it)
-		{
-			if (it != config.realtime_fids.begin())
-				o << ", ";
-			o << it->first << ": " << it->second;
-		}
-		o << " }, \"bins\": [ ";
-		for (auto it = config.bins.begin();
-			it != config.bins.end();
-			++it)
-		{
-			if (it != config.bins.begin())
-				o << ", ";
-			o << '"' << *it << '"';
-		}
-		o << " ] }";
+			" ] }";
 		return o;
 	}
 

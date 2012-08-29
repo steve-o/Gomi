@@ -143,10 +143,10 @@ gomi::rfa_t::Init()
 		fix_rfa_string_path (&name);
 		staging->setString (name, kConnectionType);
 /* Default RSSL port */
-		if (!it->rssl_default_port.empty()) {
+		if (!it->rssl_port.empty()) {
 			name = "/Connections/" + connectionName + "/rsslPort";
 			fix_rfa_string_path (&name);
-			value.set (it->rssl_default_port.c_str());
+			value.set (it->rssl_port.c_str());
 			staging->setString (name, value);
 		}
 /* Remove publish queue. */
