@@ -24,7 +24,7 @@ using namespace xercesc;
 /** L"" prefix is used in preference to u"" because of MSVC2010 **/
 
 bool
-gomi::config_t::validate()
+gomi::config_t::Validate()
 {
 	if (service_name.empty()) {
 		LOG(ERROR) << "Undefined service name.";
@@ -113,7 +113,7 @@ gomi::config_t::validate()
 }
 
 bool
-gomi::config_t::parseDomElement (
+gomi::config_t::ParseDomElement (
 	const DOMElement*	root
 	)
 {
@@ -125,7 +125,7 @@ gomi::config_t::parseDomElement (
 	nodeList = root->getElementsByTagName (L"config");
 
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseConfigNode (nodeList->item (i))) {
+		if (!ParseConfigNode (nodeList->item (i))) {
 			LOG(ERROR) << "Failed parsing <config> nth-node #" << (1 + i) << '.';
 			return false;
 		}
@@ -133,7 +133,7 @@ gomi::config_t::parseDomElement (
 	if (0 == nodeList->getLength())
 		LOG(WARNING) << "No <config> nodes found in configuration.";
 
-	if (!validate()) {
+	if (!Validate()) {
 		LOG(ERROR) << "Failed validation, malformed configuration file requires correction.";
 		return false;
 	}
@@ -143,7 +143,7 @@ gomi::config_t::parseDomElement (
 }
 
 bool
-gomi::config_t::parseConfigNode (
+gomi::config_t::ParseConfigNode (
 	const DOMNode*		node
 	)
 {
@@ -154,7 +154,7 @@ gomi::config_t::parseConfigNode (
 /* <Snmp> */
 	nodeList = elem->getElementsByTagName (L"Snmp");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseSnmpNode (nodeList->item (i))) {
+		if (!ParseSnmpNode (nodeList->item (i))) {
 			LOG(ERROR) << "Failed parsing <Snmp> nth-node #" << (1 + i) << '.';
 			return false;
 		}
@@ -162,7 +162,7 @@ gomi::config_t::parseConfigNode (
 /* <Rfa> */
 	nodeList = elem->getElementsByTagName (L"Rfa");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseRfaNode (nodeList->item (i))) {
+		if (!ParseRfaNode (nodeList->item (i))) {
 			LOG(ERROR) << "Failed parsing <Rfa> nth-node #" << (1 + i) << '.';
 			return false;
 		}
@@ -172,7 +172,7 @@ gomi::config_t::parseConfigNode (
 /* <Gomi> */
 	nodeList = elem->getElementsByTagName (L"Gomi");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseGomiNode (nodeList->item (i))) {
+		if (!ParseGomiNode (nodeList->item (i))) {
 			LOG(ERROR) << "Failed parsing <Gomi> nth-node #" << (1 + i) << '.';
 			return false;
 		}
@@ -184,7 +184,7 @@ gomi::config_t::parseConfigNode (
 
 /* <Snmp> */
 bool
-gomi::config_t::parseSnmpNode (
+gomi::config_t::ParseSnmpNode (
 	const DOMNode*		node
 	)
 {
@@ -201,7 +201,7 @@ gomi::config_t::parseSnmpNode (
 /* <agentX> */
 	nodeList = elem->getElementsByTagName (L"agentX");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseAgentXNode (nodeList->item (i))) {
+		if (!ParseAgentXNode (nodeList->item (i))) {
 			vpf::XMLStringPool xml;
 			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
 			LOG(ERROR) << "Failed parsing <agentX> nth-node #" << (1 + i) << ": \"" << text_content << "\".";
@@ -213,7 +213,7 @@ gomi::config_t::parseSnmpNode (
 }
 
 bool
-gomi::config_t::parseAgentXNode (
+gomi::config_t::ParseAgentXNode (
 	const DOMNode*		node
 	)
 {
@@ -237,7 +237,7 @@ gomi::config_t::parseAgentXNode (
 
 /* <Rfa> */
 bool
-gomi::config_t::parseRfaNode (
+gomi::config_t::ParseRfaNode (
 	const DOMNode*		node
 	)
 {
@@ -259,7 +259,7 @@ gomi::config_t::parseRfaNode (
 /* <service> */
 	nodeList = elem->getElementsByTagName (L"service");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseServiceNode (nodeList->item (i))) {
+		if (!ParseServiceNode (nodeList->item (i))) {
 			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
 			LOG(ERROR) << "Failed parsing <service> nth-node #" << (1 + i) << ": \"" << text_content << "\".";
 			return false;
@@ -270,7 +270,7 @@ gomi::config_t::parseRfaNode (
 /* <session> */
 	nodeList = elem->getElementsByTagName (L"session");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseSessionNode (nodeList->item (i))) {
+		if (!ParseSessionNode (nodeList->item (i))) {
 			LOG(ERROR) << "Failed parsing <session> nth-node #" << (1 + i) << ".";
 			return false;
 		}
@@ -280,7 +280,7 @@ gomi::config_t::parseRfaNode (
 /* <monitor> */
 	nodeList = elem->getElementsByTagName (L"monitor");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseMonitorNode (nodeList->item (i))) {
+		if (!ParseMonitorNode (nodeList->item (i))) {
 			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
 			LOG(ERROR) << "Failed parsing <monitor> nth-node #" << (1 + i) << ": \"" << text_content << "\".";
 			return false;
@@ -289,7 +289,7 @@ gomi::config_t::parseRfaNode (
 /* <eventQueue> */
 	nodeList = elem->getElementsByTagName (L"eventQueue");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseEventQueueNode (nodeList->item (i))) {
+		if (!ParseEventQueueNode (nodeList->item (i))) {
 			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
 			LOG(ERROR) << "Failed parsing <eventQueue> nth-node #" << (1 + i) << ": \"" << text_content << "\".";
 			return false;
@@ -298,7 +298,7 @@ gomi::config_t::parseRfaNode (
 /* <vendor> */
 	nodeList = elem->getElementsByTagName (L"vendor");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseVendorNode (nodeList->item (i))) {
+		if (!ParseVendorNode (nodeList->item (i))) {
 			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
 			LOG(ERROR) << "Failed parsing <vendor> nth-node #" << (1 + i) << ": \"" << text_content << "\".";
 			return false;
@@ -308,7 +308,7 @@ gomi::config_t::parseRfaNode (
 }
 
 bool
-gomi::config_t::parseServiceNode (
+gomi::config_t::ParseServiceNode (
 	const DOMNode*		node
 	)
 {
@@ -328,7 +328,7 @@ gomi::config_t::parseServiceNode (
 }
 
 bool
-gomi::config_t::parseSessionNode (
+gomi::config_t::ParseSessionNode (
 	const DOMNode*		node
 	)
 {
@@ -356,7 +356,7 @@ gomi::config_t::parseSessionNode (
 /* <publisher> */
 	nodeList = elem->getElementsByTagName (L"publisher");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parsePublisherNode (nodeList->item (i), session.publisher_name)) {
+		if (!ParsePublisherNode (nodeList->item (i), &session.publisher_name)) {
 			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
 			LOG(ERROR) << "Failed parsing <publisher> nth-node #" << (1 + i) << ": \"" << text_content << "\".";
 			return false;
@@ -365,7 +365,7 @@ gomi::config_t::parseSessionNode (
 /* <connection> */
 	nodeList = elem->getElementsByTagName (L"connection");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseConnectionNode (nodeList->item (i), session)) {
+		if (!ParseConnectionNode (nodeList->item (i), &session)) {
 			LOG(ERROR) << "Failed parsing <connection> nth-node #" << (1 + i) << '.';
 			return false;
 		}
@@ -378,9 +378,9 @@ gomi::config_t::parseSessionNode (
 }
 
 bool
-gomi::config_t::parseConnectionNode (
+gomi::config_t::ParseConnectionNode (
 	const DOMNode*		node,
-	session_config_t&	session
+	session_config_t*const	session
 	)
 {
 	const DOMElement* elem = static_cast<const DOMElement*>(node);
@@ -388,18 +388,51 @@ gomi::config_t::parseConnectionNode (
 	const DOMNodeList* nodeList;
 
 /* name="name" */
-	session.connection_name = xml.transcode (elem->getAttribute (L"name"));
-	if (session.connection_name.empty()) {
+	session->connection_name = xml.transcode (elem->getAttribute (L"name"));
+	if (session->connection_name.empty()) {
 		LOG(ERROR) << "Undefined \"name\" attribute, value cannot be empty.";
 		return false;
 	}
 /* port="port" */
-	session.rssl_port = xml.transcode (elem->getAttribute (L"port"));
+	session->rssl_port = xml.transcode (elem->getAttribute (L"port"));
+
+/* <client name="username">
+ * Setting is optional.
+ */
+	nodeList = elem->getElementsByTagName (L"client");
+	for (int i = 0; i < nodeList->getLength(); i++) {
+		client_config_t client;
+		if (!ParseClientNode (nodeList->item (i), &client)) {
+			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
+			LOG(ERROR) << "Failed parsing <client> nth-node #" << (1 + i) << ": \"" << text_content << "\".";			
+			return false;
+		}
+		clients.push_back (client);
+	}
+
 	return true;
 }
 
 bool
-gomi::config_t::parseMonitorNode (
+gomi::config_t::ParseClientNode (
+	const DOMNode*		node,
+	client_config_t*const	client
+	)
+{
+	const DOMElement* elem = static_cast<const DOMElement*>(node);
+	vpf::XMLStringPool xml;
+
+/* name="username" */
+	client->name = xml.transcode (elem->getAttribute (L"name"));
+	if (client->name.empty()) {
+		LOG(ERROR) << "Undefined \"name\" attribute, value cannot be empty.";
+		return false;
+	}
+	return true;
+}
+
+bool
+gomi::config_t::ParseMonitorNode (
 	const DOMNode*		node
 	)
 {
@@ -415,7 +448,7 @@ gomi::config_t::parseMonitorNode (
 }
 
 bool
-gomi::config_t::parseEventQueueNode (
+gomi::config_t::ParseEventQueueNode (
 	const DOMNode*		node
 	)
 {
@@ -431,21 +464,21 @@ gomi::config_t::parseEventQueueNode (
 }
 
 bool
-gomi::config_t::parsePublisherNode (
+gomi::config_t::ParsePublisherNode (
 	const DOMNode*		node,
-	std::string&		name
+	std::string*const	name
 	)
 {
 	const DOMElement* elem = static_cast<const DOMElement*>(node);
 	vpf::XMLStringPool xml;
 
 /* name="name" */
-	name = xml.transcode (elem->getAttribute (L"name"));
+	*name = xml.transcode (elem->getAttribute (L"name"));
 	return true;
 }
 
 bool
-gomi::config_t::parseVendorNode (
+gomi::config_t::ParseVendorNode (
 	const DOMNode*		node
 	)
 {
@@ -464,7 +497,7 @@ gomi::config_t::parseVendorNode (
 
 /* <Gomi> */
 bool
-gomi::config_t::parseGomiNode (
+gomi::config_t::ParseGomiNode (
 	const DOMNode*		node
 	)
 {
@@ -499,7 +532,7 @@ gomi::config_t::parseGomiNode (
 /* <fields> */
 	nodeList = elem->getElementsByTagName (L"fields");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseFieldsNode (nodeList->item (i))) {
+		if (!ParseFieldsNode (nodeList->item (i))) {
 			LOG(ERROR) << "Failed parsing <fields> nth-node #" << (1 + i) << ".";
 			return false;
 		}
@@ -511,7 +544,7 @@ gomi::config_t::parseGomiNode (
 
 /* <fields> */
 bool
-gomi::config_t::parseFieldsNode (
+gomi::config_t::ParseFieldsNode (
 	const DOMNode*		node
 	)
 {
@@ -521,7 +554,7 @@ gomi::config_t::parseFieldsNode (
 /* <archive> */
 	nodeList = elem->getElementsByTagName (L"archive");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseArchiveNode (nodeList->item (i))) {
+		if (!ParseArchiveNode (nodeList->item (i))) {
 			LOG(ERROR) << "Failed parsing <archive> nth-node #" << (1 + i) << ".";
 			return false;
 		}
@@ -533,7 +566,7 @@ gomi::config_t::parseFieldsNode (
 
 /* <archive> */
 bool
-gomi::config_t::parseArchiveNode (
+gomi::config_t::ParseArchiveNode (
 	const DOMNode*		node
 	)
 {
@@ -544,7 +577,7 @@ gomi::config_t::parseArchiveNode (
 /* <fid> */
 	nodeList = elem->getElementsByTagName (L"fid");
 	for (int i = 0; i < nodeList->getLength(); i++) {
-		if (!parseFidNode (nodeList->item (i), archive_fids)) {
+		if (!ParseFidNode (nodeList->item (i), &archive_fids)) {
 			const std::string text_content = xml.transcode (nodeList->item (i)->getTextContent());
 			LOG(ERROR) << "Failed parsing <fid> nth-node #" << (1 + i) << ": \"" << text_content << "\".";
 			return false;
@@ -561,9 +594,9 @@ gomi::config_t::parseArchiveNode (
  */
 
 bool
-gomi::config_t::parseFidNode (
+gomi::config_t::ParseFidNode (
 	const DOMNode*		node,
-	gomi::fidset_t&		fidset
+	gomi::fidset_t*const	fidset
 	)
 {
 	const DOMElement* elem = static_cast<const DOMElement*>(node);
@@ -582,18 +615,18 @@ gomi::config_t::parseFidNode (
 
 /* convenient inlining */
 	int* fid = nullptr;
-	if ("VMA" == name)		fid = &fidset.RdmAverageVolumeId;
-	else if ("NZERO_VMA" == name)	fid = &fidset.RdmAverageNonZeroVolumeId;
-	else if ("NUM_MOVES" == name)	fid = &fidset.RdmTotalMovesId;
-	else if ("NM_HIGH" == name)	fid = &fidset.RdmMaximumMovesId;
-	else if ("NM_LOW" == name)	fid = &fidset.RdmMinimumMovesId;
-	else if ("NM_SMALL" == name)	fid = &fidset.RdmSmallestMovesId;
-	else if ("PCTCHG_10D" == name)	fid = &fidset.Rdm10DayPercentChangeId;
-	else if ("PCTCHG_15D" == name)	fid = &fidset.Rdm15DayPercentChangeId;
-	else if ("PCTCHG_20D" == name)	fid = &fidset.Rdm20DayPercentChangeId;
-	else if ("PCTCHG_10T" == name)	fid = &fidset.Rdm10TradingDayPercentChangeId;
-	else if ("PCTCHG_15T" == name)	fid = &fidset.Rdm15TradingDayPercentChangeId;
-	else if ("PCTCHG_20T" == name)	fid = &fidset.Rdm20TradingDayPercentChangeId;
+	if ("VMA" == name)		fid = &fidset->RdmAverageVolumeId;
+	else if ("NZERO_VMA" == name)	fid = &fidset->RdmAverageNonZeroVolumeId;
+	else if ("NUM_MOVES" == name)	fid = &fidset->RdmTotalMovesId;
+	else if ("NM_HIGH" == name)	fid = &fidset->RdmMaximumMovesId;
+	else if ("NM_LOW" == name)	fid = &fidset->RdmMinimumMovesId;
+	else if ("NM_SMALL" == name)	fid = &fidset->RdmSmallestMovesId;
+	else if ("PCTCHG_10D" == name)	fid = &fidset->Rdm10DayPercentChangeId;
+	else if ("PCTCHG_15D" == name)	fid = &fidset->Rdm15DayPercentChangeId;
+	else if ("PCTCHG_20D" == name)	fid = &fidset->Rdm20DayPercentChangeId;
+	else if ("PCTCHG_10T" == name)	fid = &fidset->Rdm10TradingDayPercentChangeId;
+	else if ("PCTCHG_15T" == name)	fid = &fidset->Rdm15TradingDayPercentChangeId;
+	else if ("PCTCHG_20T" == name)	fid = &fidset->Rdm20TradingDayPercentChangeId;
 	else {
 		LOG(ERROR) << "Unknown \"name\" attribute value \"" << name << "\".";
 		return false;

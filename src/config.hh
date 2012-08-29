@@ -34,6 +34,12 @@ namespace gomi
 		unsigned session_capacity;
 	};
 
+	struct client_config_t
+	{
+//  RFA login user name.
+		std::string name;
+	};
+
 	struct fidset_t
 	{
 /* VMA_20D: Volume moving average. */
@@ -66,29 +72,25 @@ namespace gomi
 	{
 		config_t();
 
-		bool parseDomElement (const xercesc::DOMElement* elem);
-		bool parseConfigNode (const xercesc::DOMNode* node);
-		bool parseSnmpNode (const xercesc::DOMNode* node);
-		bool parseAgentXNode (const xercesc::DOMNode* node);
-		bool parseRfaNode (const xercesc::DOMNode* node);
-		bool parseServiceNode (const xercesc::DOMNode* node);
-		bool parseConnectionNode (const xercesc::DOMNode* node, session_config_t& session);
-		bool parsePublisherNode (const xercesc::DOMNode* node, std::string& publisher);
-		bool parseSessionNode (const xercesc::DOMNode* node);
-		bool parseMonitorNode (const xercesc::DOMNode* node);
-		bool parseEventQueueNode (const xercesc::DOMNode* node);
-		bool parseVendorNode (const xercesc::DOMNode* node);
-		bool parseGomiNode (const xercesc::DOMNode* node);
-		bool parseFieldsNode (const xercesc::DOMNode* node);
-		bool parseArchiveNode (const xercesc::DOMNode* node);
-		bool parseRealtimeNode (const xercesc::DOMNode* node);
-		bool parseRealtimeBinNode (const xercesc::DOMNode* node);
-		bool parseFidNode (const xercesc::DOMNode* node, fidset_t& fidset);
-		bool parseBinsNode (const xercesc::DOMNode* node);
-		bool parseBinNode (const xercesc::DOMNode* node, std::string& bin);
-		bool parseTimeNode (const xercesc::DOMNode* node, std::string& time);
+		bool ParseDomElement (const xercesc::DOMElement* elem);
+		bool ParseConfigNode (const xercesc::DOMNode* node);
+		bool ParseSnmpNode (const xercesc::DOMNode* node);
+		bool ParseAgentXNode (const xercesc::DOMNode* node);
+		bool ParseRfaNode (const xercesc::DOMNode* node);
+		bool ParseServiceNode (const xercesc::DOMNode* node);
+		bool ParseConnectionNode (const xercesc::DOMNode* node, session_config_t*const session);
+		bool ParseClientNode (const xercesc::DOMNode* node, client_config_t*const client);
+		bool ParsePublisherNode (const xercesc::DOMNode* node, std::string*const publisher);
+		bool ParseSessionNode (const xercesc::DOMNode* node);
+		bool ParseMonitorNode (const xercesc::DOMNode* node);
+		bool ParseEventQueueNode (const xercesc::DOMNode* node);
+		bool ParseVendorNode (const xercesc::DOMNode* node);
+		bool ParseGomiNode (const xercesc::DOMNode* node);
+		bool ParseFieldsNode (const xercesc::DOMNode* node);
+		bool ParseArchiveNode (const xercesc::DOMNode* node);
+		bool ParseFidNode (const xercesc::DOMNode* node, fidset_t*const fidset);
 
-		bool validate();
+		bool Validate();
 
 //  SNMP implant.
 		bool is_snmp_enabled;
@@ -111,6 +113,12 @@ namespace gomi
 //  RFA sessions comprising of session names, connection names,
 //  RSSL hostname or IP address and default RSSL port, e.g. 14002, 14003.
 		std::vector<session_config_t> sessions;
+
+//  Minimum interval before a state change will occur.
+		unsigned duration_threshold;
+
+//  Reserved client slots for outage recording.
+		std::vector<client_config_t> clients;
 
 //  RFA application logger monitor name.
 		std::string monitor_name;
@@ -156,6 +164,14 @@ namespace gomi
 	}
 
 	inline
+	std::ostream& operator<< (std::ostream& o, const client_config_t& client) {
+		o << "{ "
+			  "\"name\": \"" << client.name << "\""
+			" }";
+		return o;
+	}
+
+	inline
 	std::ostream& operator<< (std::ostream& o, const fidset_t& fidset) {
 		o << "{ "
 			  "\"VMA\": " << fidset.RdmAverageVolumeId <<
@@ -188,6 +204,17 @@ namespace gomi
 			++it)
 		{
 			if (it != config.sessions.begin())
+				o << ", ";
+			o << *it;
+		}
+		o << " ]"
+			", \"duration_threshold\": " << config.duration_threshold <<
+			", \"clients\": [";
+		for (auto it = config.clients.begin();
+			it != config.clients.end();
+			++it)
+		{
+			if (it != config.clients.begin())
 				o << ", ";
 			o << *it;
 		}

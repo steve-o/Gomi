@@ -716,7 +716,7 @@ gomi::gomi_t::init (
 			" }"
 		" }";
 
-	if (!config_.parseDomElement (vpf_config.getXmlConfigData())) {
+	if (!config_.ParseDomElement (vpf_config.getXmlConfigData())) {
 		is_shutdown_ = true;
 		throw vpf::UserPluginException ("Invalid configuration, aborting.");
 	}

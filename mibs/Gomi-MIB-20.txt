@@ -16,7 +16,7 @@ IMPORTS
 -- A brief description and update information about this mib.
 --
 gomiMIB MODULE-IDENTITY
-	LAST-UPDATED "201208270000Z"
+	LAST-UPDATED "201208290000Z"
 	ORGANIZATION
 		"Thomson Reuters"
 	CONTACT-INFO
@@ -29,6 +29,9 @@ gomiMIB MODULE-IDENTITY
 		USA"
 	DESCRIPTION
 		"The MIB module for managing Gomi bin analytics."
+	REVISION "201208290000Z"
+	DESCRIPTION
+		"Version 2.0: Add persistent client outage measurement metrics."
 	REVISION "201208270000Z"
 	DESCRIPTION
 		"Version 1.0: Initial MIB."
@@ -962,5 +965,169 @@ gomiOmmInactiveClientSessionException OBJECT-TYPE
 	DESCRIPTION
 		"Number of OMM inactive client session exceptions caught for this client."
 	::= { gomiClientPerformanceEntry 45 }
+
+-- Outage Measurement Metrics Table
+
+gomiOutageMeasurementTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF gomiOutageMeasurementEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding outage measurement metrics for assigned clients."
+	::= { gomiPlugin 7 }
+
+gomiOutageMeasurementEntry OBJECT-TYPE
+	SYNTAX     gomiOutageMeasurementEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per client outage measurement metric information."
+	INDEX    { gomiOutageMeasurementId,
+		       gomiOutageMeasurementPluginUniqueInstance,
+	           gomiOutageMeasurementName }
+	::= { gomiOutageMeasurementTable 1 }
+
+gomiOutageMeasurementEntry ::= SEQUENCE {
+	gomiOutageMeasurementId
+		OCTET STRING,
+	gomiOutageMeasurementPluginUniqueInstance
+		Unsigned32,
+	gomiOutageMeasurementLoginName
+		OCTET STRING,
+	gomiAccumulatedOutageTime
+		Counter32,
+	gomiAccumulatedFailures
+		Counter32,
+	gomiRecordingStartTime
+		Counter32
+	}
+
+gomiOutageMeasurementId OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { gomiOutageMeasurementEntry 1 }
+
+gomiOutageMeasurementPluginUniqueInstance OBJECT-TYPE
+	SYNTAX     Unsigned32
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Unique instance identifier for this plugin."
+	::= { gomiOutageMeasurementEntry 2 }
+
+gomiOutageMeasurementLoginName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Client username."
+	::= { gomiOutageMeasurementEntry 3 }
+
+gomiAccumulatedOutageTime OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Accumulated Outage Time (AOT) since measurement started."
+	::= { gomiOutageMeasurementEntry 4 }
+
+gomiAccumulatedFailures OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of Accumulated Failures (NAF) since measurement started."
+	::= { gomiOutageMeasurementEntry 5 }
+
+gomiRecordingStartTime OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Recording Start Time (RST)."
+	::= { gomiClientOutageOnLineEntry 6 }
+
+-- Outage Event Characterization Table
+
+gomiOutageEventTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF gomiOutageEventEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding reocrded state changes of monitored clients."
+	::= { gomiPlugin 8 }
+
+gomiOutageEventEntry OBJECT-TYPE
+	SYNTAX     gomiOutageEventEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per outage event information."
+	INDEX    { gomiOutageEventId,
+		       gomiOutageEventPluginUniqueInstance,
+	           gomiOutageEventLoginName,
+			   gomiOutageEventStartTime }
+	::= { gomiOutageEventTable 1 }
+
+gomiOutageEventEntry ::= SEQUENCE {
+	gomiOutageEventId
+		OCTET STRING,
+	gomiOutageEventPluginUniqueInstance
+		Unsigned32,
+	gomiOutageEventLoginName
+		OCTET STRING,
+	gomiOutageEventStartTime
+		Counter32,
+	gomiOutageEventEndTime
+		Counter32
+	}
+
+gomiOutageEventId OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { gomiOutageEventEntry 1 }
+
+gomiOutageEventPluginUniqueInstance OBJECT-TYPE
+	SYNTAX     Unsigned32
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Unique instance identifier for this plugin."
+	::= { gomiOutageEventEntry 2 }
+
+gomiOutageEventLoginName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Client username."
+	::= { gomiOutageEventEntry 3 }
+
+gomiRecordingStartTime OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Time when the outage is first detected."
+	::= { gomiOutageEventEntry 3 }
+
+gomiRecordingEndTime OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Time when the outage ends."
+	::= { gomiOutageEventEntry 4 }
 
 END

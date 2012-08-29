@@ -7,8 +7,8 @@ cmake_minimum_required (VERSION 2.8.8)
 project (Gomi)
 
 set(GOMI_VERSION_MAJOR 2)
-set(GOMI_VERSION_MINOR 2)
-set(GOMI_VERSION_BUILD 19)
+set(GOMI_VERSION_MINOR 3)
+set(GOMI_VERSION_BUILD 20)
 
 # Net-SNMP SDK installed, tested 5.7.1.
 set(NETSNMP_ROOT D:/net-snmp-5.7.1)
