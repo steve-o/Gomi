@@ -114,8 +114,8 @@ namespace gomi
 //  RSSL hostname or IP address and default RSSL port, e.g. 14002, 14003.
 		std::vector<session_config_t> sessions;
 
-//  Minimum interval before a state change will occur.
-		unsigned duration_threshold;
+//  Maximum number of historical outage events.
+		unsigned history_table_size;
 
 //  Reserved client slots for outage recording.
 		std::vector<client_config_t> clients;
@@ -208,7 +208,7 @@ namespace gomi
 			o << *it;
 		}
 		o << " ]"
-			", \"duration_threshold\": " << config.duration_threshold <<
+			", \"history_table_size\": " << config.history_table_size <<
 			", \"clients\": [";
 		for (auto it = config.clients.begin();
 			it != config.clients.end();

@@ -29,6 +29,107 @@ static const RFA_String kContextName ("RFA");
 static const RFA_String kRdmFieldDictionaryName ("RWFFld");
 static const RFA_String kEnumTypeDictionaryName ("RWFEnum");
 
+/* http://en.wikipedia.org/wiki/Unix_epoch */
+static const boost::gregorian::date kUnixEpoch (1970, 1, 1);
+
+/* Convert Posix time to Unix Epoch time.
+ */
+template< typename TimeT >
+inline
+TimeT
+to_unix_epoch (
+	const boost::posix_time::ptime t
+	)
+{
+	return (t - boost::posix_time::ptime (kUnixEpoch)).total_seconds();
+}
+
+gomi::cool_t::~cool_t()
+{
+	const auto now (boost::posix_time::second_clock::universal_time());
+	event_t final_duration (name_.c_str(), transition_time_, now, is_online_);
+	events_.push_back (final_duration);
+	if (!is_online_) accumulated_outage_time_ += now - transition_time_;
+}
+
+boost::posix_time::time_duration
+gomi::cool_t::GetAccumulatedOutageTime (
+	boost::posix_time::ptime now
+	) const
+{
+	if (is_online_)
+		return accumulated_outage_time_;
+	else
+		return accumulated_outage_time_ + (now - transition_time_);
+}
+
+void
+gomi::cool_t::OnRecovery()
+{
+	CHECK (!is_online_);
+	const auto now (boost::posix_time::second_clock::universal_time());
+	boost::unique_lock<boost::shared_mutex> (events_lock_);
+	event_t outage (name_.c_str(), transition_time_, now, is_online_);
+	events_.push_back (outage);
+/* start of UP duration */
+	is_online_ = true;
+	++accumulated_failures_;
+	accumulated_outage_time_ += now - transition_time_;
+	transition_time_ = now;
+}
+
+void
+gomi::cool_t::OnOutage()
+{
+	CHECK (is_online_);
+	const auto now (boost::posix_time::second_clock::universal_time());
+	boost::unique_lock<boost::shared_mutex> (events_lock_);
+	event_t online (name_.c_str(), transition_time_, now, is_online_);
+	events_.push_back (online);
+/* start of DOWN duration */
+	is_online_ = false;
+	transition_time_ = now;
+}
+
+/* Availability = 1 - AOT / (TC - RST)
+ */
+double
+gomi::cool_t::GetAvailability (boost::posix_time::ptime now) const
+{
+	const double AOT (GetAccumulatedOutageTime (now).total_seconds());
+	const double measurement_interval ((now - GetRecordingStartTime()).total_seconds());
+	if (measurement_interval < 1.0)
+		return 0.0;
+	else
+		return 1.0 - AOT / measurement_interval;
+}
+
+/* MTTR = AOT / NAF
+ */
+double
+gomi::cool_t::GetMTTR (boost::posix_time::ptime now) const
+{
+	const double AOT (GetAccumulatedOutageTime (now).total_seconds());
+	const double NAF (GetAccumulatedFailures());
+	if (NAF < 1.0)	/* overflow, round up to 1. */
+		return AOT;
+	else
+		return AOT / NAF;
+}
+
+/* MTBF = (TC - RST) / NAF
+ */
+double
+gomi::cool_t::GetMTBF (boost::posix_time::ptime now) const
+{
+	const double measurement_interval ((now - GetRecordingStartTime()).total_seconds());
+	const double NAF (GetAccumulatedFailures());
+	if (NAF < 1.0)
+		return measurement_interval;
+	else
+		return measurement_interval / NAF;
+}
+
 gomi::provider_t::provider_t (
 	const gomi::config_t& config,
 	std::shared_ptr<gomi::rfa_t> rfa,
@@ -61,7 +162,8 @@ gomi::provider_t::~provider_t()
 	Clear();
 /* Summary output */
 	using namespace boost::posix_time;
-	auto uptime = second_clock::universal_time() - creation_time_;
+	const auto now (boost::posix_time::second_clock::universal_time());
+	auto uptime = now - creation_time_;
 	VLOG(3) << "Provider summary: {"
 		 " \"Uptime\": \"" << to_simple_string (uptime) << "\""
 		", \"MsgsSent\": " << cumulative_stats_[PROVIDER_PC_MSGS_SENT] <<
@@ -70,6 +172,17 @@ gomi::provider_t::~provider_t()
 		", \"ConnectionEvents\": " << cumulative_stats_[PROVIDER_PC_CONNECTION_EVENTS_RECEIVED] <<
 		", \"ClientSessions\": " << cumulative_stats_[PROVIDER_PC_CLIENT_SESSION_ACCEPTED] <<
 		" }";
+/* COOL */
+	LOG(INFO) << "Registered client summary:";
+	for (auto it = cool_.begin(); it != cool_.end(); ++it) {
+		LOG(INFO) << *(it->second.get());
+		cool_.erase (it);
+	}
+	if ((bool)events_) {
+		LOG(INFO) << "Outage event summary:";
+		for (auto it = events_->begin(); it != events_->end(); ++it)
+			LOG(INFO) << *it;
+	}
 	LOG(INFO) << "Provider closed.";
 }
 
@@ -165,6 +278,21 @@ gomi::provider_t::Init()
 			"\"What\": \"" << e.what() << "\" }";
 		return false;
 	}
+
+	if (config_.history_table_size > 0)
+	{
+/* pre-allocate history table */
+		events_.reset (new boost::circular_buffer<event_t> (config_.history_table_size));
+
+/* pre-registered client logins. */
+		for (auto it = config_.clients.begin(); it != config_.clients.end(); ++it)
+		{
+			auto cool = std::make_shared<cool_t> (it->name, *events_.get(), events_lock_);
+			CHECK((bool)cool);
+			cool_.emplace (std::make_pair (it->name, std::move (cool)));
+		}
+	}
+
 	return true;
 }
 
@@ -317,6 +445,10 @@ gomi::provider_t::OnOMMActiveClientSessionEvent (
 		LOG(ERROR) << "OMMActiveClientSession::InvalidUsageException: { "
 				"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 				" }";
+	} catch (std::exception& e) {
+		LOG(ERROR) << "Rfa::Exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
 	}
 }
 
@@ -393,7 +525,7 @@ gomi::provider_t::AcceptClientSession (
 
 bool
 gomi::provider_t::EraseClientSession (
-	rfa::common::Handle* handle
+	rfa::common::Handle*const handle
 	)
 {
 /* unregister RFA client session. */

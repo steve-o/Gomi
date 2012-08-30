@@ -1082,10 +1082,12 @@ gomiOutageEventEntry ::= SEQUENCE {
 		Unsigned32,
 	gomiOutageEventLoginName
 		OCTET STRING,
-	gomiOutageEventStartTime
+	gomiOutageStartTime
 		Counter32,
-	gomiOutageEventEndTime
+	gomiOutageEndTime
 		Counter32
+	gomiOutageState
+		INTEGER
 	}
 
 gomiOutageEventId OBJECT-TYPE
@@ -1112,22 +1114,33 @@ gomiOutageEventLoginName OBJECT-TYPE
 		"Client username."
 	::= { gomiOutageEventEntry 3 }
 
-gomiRecordingStartTime OBJECT-TYPE
+gomiOutageStartTime OBJECT-TYPE
 	SYNTAX     Counter32
 	UNITS      "seconds"
 	MAX-ACCESS read-only
 	STATUS     current
 	DESCRIPTION
 		"Time when the outage is first detected."
-	::= { gomiOutageEventEntry 3 }
+	::= { gomiOutageEventEntry 4 }
 
-gomiRecordingEndTime OBJECT-TYPE
+gomiOutageEndTime OBJECT-TYPE
 	SYNTAX     Counter32
 	UNITS      "seconds"
 	MAX-ACCESS read-only
 	STATUS     current
 	DESCRIPTION
 		"Time when the outage ends."
-	::= { gomiOutageEventEntry 4 }
+	::= { gomiOutageEventEntry 5 }
+
+gomiOutageStatus OBJECT-TYPE
+	SYNTAX     INTEGER {
+			Up (0),
+			Down (1)
+		   }
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Status of service during recorded time period."
+	::= { gomiOutageEventEntry 6 }
 
 END

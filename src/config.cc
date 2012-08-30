@@ -256,6 +256,11 @@ gomi::config_t::ParseRfaNode (
 	if (!attr.empty())
 		maximum_data_size = (size_t)std::atol (attr.c_str());
 
+/* historyTableSize="rows" */
+	attr = xml.transcode (elem->getAttribute (L"historyTableSize"));
+	if (!attr.empty())
+		history_table_size = (unsigned)std::atol (attr.c_str());
+
 /* <service> */
 	nodeList = elem->getElementsByTagName (L"service");
 	for (int i = 0; i < nodeList->getLength(); i++) {

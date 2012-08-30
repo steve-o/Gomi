@@ -188,6 +188,11 @@ public:
 				", \"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 				" }";
 			return false;
+		} catch (std::exception& e) {
+			LOG(ERROR) << prefix_ << "Rfa::Exception: { "
+				"\"What\": \"" << e.what() << "\""
+				" }";
+			return false;
 		}
 
 		try {
@@ -1143,6 +1148,10 @@ gomi::event_pump_t::Run (void)
 				LOG(ERROR) << "EncodedBuffer::InvalidUsageException: { " <<
 						"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 						" }";
+			} catch (std::exception& e) {
+				LOG(ERROR) << "Rfa::Exception: { "
+					"\"What\": \"" << e.what() << "\""
+					" }";
 			}
 			rc = zmq_msg_close (&msg);
 			CHECK(0 == rc);

@@ -13,6 +13,9 @@
 /* Boost Atomics */
 #include <boost/atomic.hpp>
 
+/* Circular buffer */
+#include <boost/circular_buffer.hpp>
+
 /* Boost Posix Time */
 #include <boost/date_time/posix_time/posix_time.hpp>
 
@@ -55,6 +58,7 @@ namespace gomi
 	};
 
 	class client_t;
+	class event_t;
 
 	class request_t : boost::noncopyable
 	{
@@ -66,6 +70,146 @@ namespace gomi
 
 		std::weak_ptr<client_t> client;
 	};
+
+	class cool_t : boost::noncopyable
+	{
+	public:
+		cool_t (const std::string& name, boost::circular_buffer<event_t>& events, boost::shared_mutex& events_lock)
+			: name_ (name),
+			  is_online_ (false),
+			  accumulated_failures_ (1),
+			  recording_start_time_ (boost::posix_time::second_clock::universal_time()),
+			  transition_time_ (recording_start_time_),
+			  events_ (events),
+			  events_lock_ (events_lock)
+		{
+		}
+		~cool_t();
+
+		void OnRecovery();
+		void OnOutage();
+
+		const std::string& GetLoginName() const { return name_; }
+		boost::posix_time::time_duration GetAccumulatedOutageTime (boost::posix_time::ptime now) const;
+		uint32_t GetAccumulatedFailures() const { return accumulated_failures_; }
+		boost::posix_time::ptime GetRecordingStartTime() const { return recording_start_time_; }
+
+		double GetAvailability (boost::posix_time::ptime now) const;
+		double GetMTTR (boost::posix_time::ptime now) const;
+		double GetMTBF (boost::posix_time::ptime now) const;
+
+	protected:
+		std::string name_;
+		bool is_online_;
+		uint32_t accumulated_failures_;
+		boost::posix_time::time_duration accumulated_outage_time_;
+		boost::posix_time::ptime recording_start_time_, transition_time_;
+
+/* terrible but convenient */
+		boost::circular_buffer<event_t>& events_;
+		boost::shared_mutex& events_lock_;
+	};
+
+	inline
+	std::ostream& operator<< (std::ostream& o, const cool_t& cool) {
+		using namespace boost::posix_time;
+		const auto now (second_clock::universal_time());
+		const time_duration MTTR = seconds (cool.GetMTTR (now));
+		const time_duration MTBF = seconds (cool.GetMTBF (now));
+		o << "{ "
+			  "\"Username\": \"" << cool.GetLoginName() << "\""
+			", \"AOT\": \"" << to_simple_string (cool.GetAccumulatedOutageTime (now)) << "\""
+			", \"NAF\": " << cool.GetAccumulatedFailures() <<
+			", \"Availability\": \"" << (100.0 * cool.GetAvailability (now)) << "%%\""
+			", \"MTTR\": \"" << to_simple_string (MTTR) << "\""
+			", \"MTBF\": \"" << to_simple_string (MTBF) << "\""
+			" }";
+		return o;
+	}
+
+	class event_t
+	{
+	public:
+/* implicit */
+		event_t()
+			: start_time_ (boost::posix_time::not_a_date_time), end_time_ (boost::posix_time::not_a_date_time), is_online_ (false)
+		{
+		}
+
+		explicit event_t (const std::string& name, boost::posix_time::ptime start_time, boost::posix_time::ptime end_time, bool is_online)
+			: name_ (name), start_time_ (start_time), end_time_ (end_time), is_online_ (is_online)
+		{
+		}
+
+/* copy ctor */
+		event_t (const event_t& other)
+			: name_ (other.name_), start_time_ (other.start_time_), end_time_ (other.end_time_), is_online_ (other.is_online_)
+		{
+		}
+
+/* move ctor: http://msdn.microsoft.com/en-us/library/dd293665.aspx */
+		event_t (event_t&& other)
+		{
+			*this = std::move (other);
+		}
+
+/* copy assignment */
+		event_t& operator= (const event_t& other)
+		{
+			if (this != &other) {
+				name_ = other.name_;
+				start_time_ = other.start_time_;
+				end_time_ = other.end_time_;
+				is_online_ = other.is_online_;
+			}
+			return *this;
+		}
+
+/* move assignment */
+		event_t& operator= (event_t&& other)
+		{
+			if (this != &other) {
+				/* free */
+
+				/* copy */
+				name_ = other.name_;
+				start_time_ = other.start_time_;
+				end_time_ = other.end_time_;
+				is_online_ = other.is_online_;
+
+				/* release */
+				other.name_.clear();
+				other.start_time_ = boost::posix_time::not_a_date_time;
+				other.end_time_ = boost::posix_time::not_a_date_time;
+				other.is_online_ = false;
+			}
+			return *this;
+		}
+
+		const std::string& GetLoginName() const { return name_; }
+		boost::posix_time::ptime GetStartTime() const { return start_time_; }
+		boost::posix_time::ptime GetEndTime() const { return end_time_; }
+		boost::posix_time::time_duration GetDuration() const { return end_time_ - start_time_; }
+		bool IsOnline() const { return is_online_; }
+
+	protected:
+		std::string name_;
+		boost::posix_time::ptime start_time_, end_time_;
+		bool is_online_;
+	};
+
+	inline
+	std::ostream& operator<< (std::ostream& o, const event_t& event) {
+		using namespace boost::posix_time;
+		o << "{ "
+			  "\"Username\": \"" << event.GetLoginName() << "\""
+			", \"StartTime\": \"" << to_simple_string (event.GetStartTime()) << "\""
+			", \"EndTime\": \"" << to_simple_string (event.GetEndTime()) << "\""
+			", \"Duration\": \"" << to_simple_string (event.GetDuration()) << "\""
+			", \"State\": \"" << (event.IsOnline() ? "UP" : "DOWN") << "\""
+			" }";
+		return o;
+	}
 
 	class provider_t :
 		public std::enable_shared_from_this<provider_t>,
@@ -102,7 +246,7 @@ namespace gomi
 
 		bool RejectClientSession (const rfa::common::Handle* handle, const char* address);
 		bool AcceptClientSession (const rfa::common::Handle* handle, const char* address);
-		bool EraseClientSession (rfa::common::Handle* handle);
+		bool EraseClientSession (rfa::common::Handle*const handle);
 
 		void GetDirectoryResponse (rfa::message::RespMsg* msg, uint8_t rwf_major_version, uint8_t rwf_minor_version, const char* service_name, uint32_t filter_mask, uint8_t response_type);
 		void GetServiceDirectory (rfa::data::Map* map, rfa::data::SingleWriteIterator* it, uint8_t rwf_major_version, uint8_t rwf_minor_version, const char* service_name, uint32_t filter_mask);
@@ -145,6 +289,13 @@ namespace gomi
 		boost::shared_mutex clients_lock_;
 
 		friend client_t;
+
+/* COOL measurement: index is read-only */
+		boost::unordered_map<std::string, std::shared_ptr<cool_t>> cool_;
+
+/* COOL events */
+		std::shared_ptr<boost::circular_buffer<event_t>> events_;
+		boost::shared_mutex events_lock_;
 
 /* Entire request set */
 		boost::unordered_map<rfa::sessionLayer::RequestToken*const, std::weak_ptr<client_t>> requests_;

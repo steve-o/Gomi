@@ -75,7 +75,7 @@ namespace gomi
 	};
 
 	class provider_t;
-	class item_stream_t;
+	class cool_t;
 
 	class client_t :
 		public std::enable_shared_from_this<client_t>,
@@ -153,6 +153,10 @@ namespace gomi
 /* Item requests may appear before login success has been granted.
  */
 		bool is_logged_in_;
+
+/* Client is registered for outage recording.
+ */
+		std::shared_ptr<cool_t> cool_;
 
 		friend provider_t;
 

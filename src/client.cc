@@ -70,6 +70,31 @@ gomi::client_t::Init (
 void
 gomi::client_t::Clear (void)
 {
+	try {
+		if (is_logged_in_) {
+/* reject new item requests. */
+			is_logged_in_ = false;
+/* registered for outage recording. */
+			if ((bool)cool_) cool_->OnOutage();
+		}
+		if (nullptr != handle_) {
+/* forward upstream to remove reference to this. */
+			auto tmp = handle_;
+			handle_ = nullptr;
+			provider_->EraseClientSession (tmp);
+		}
+/* ignore any error */
+	} catch (const rfa::common::InvalidUsageException& e) {
+		cumulative_stats_[CLIENT_PC_OMM_INACTIVE_CLIENT_SESSION_EXCEPTION]++;
+		LOG(ERROR) << prefix_ << "OMMInactiveClientSession::InvalidUsageException: { "
+				"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
+				" }";
+	} catch (std::exception& e) {
+		LOG(ERROR) << "Rfa::Exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
+	}
+
 	provider_.reset();
 }
 
@@ -98,7 +123,7 @@ gomi::client_t::processEvent (
 	const rfa::common::Event& event_
 	)
 {
-	VLOG(10) << event_;
+	VLOG(1) << event_;
 	cumulative_stats_[CLIENT_PC_RFA_EVENTS_RECEIVED]++;
 	last_activity_ = boost::posix_time::second_clock::universal_time();
 	switch (event_.getType()) {
@@ -217,6 +242,10 @@ gomi::client_t::OnLoginRequest (
 			", " << login_msg <<
 			", \"RequestToken\": " << (uintptr_t)login_token <<
 			" }";
+	} catch (std::exception& e) {
+		LOG(ERROR) << "Rfa::Exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
 	}
 
 	static const uint8_t streaming_request = rfa::message::ReqMsg::InitialImageFlag | rfa::message::ReqMsg::InterestAfterRefreshFlag;
@@ -255,10 +284,6 @@ gomi::client_t::OnLoginRequest (
 		else
 		{
 			AcceptLogin (login_msg, login_token);
-
-/* save token for closing the session. */
-			login_token_  = login_token;
-			is_logged_in_ = true;
 		}
 /* ignore any error */
 	} catch (const rfa::common::InvalidUsageException& e) {
@@ -268,6 +293,10 @@ gomi::client_t::OnLoginRequest (
 			   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			", " << login_msg <<
 			", \"RequestToken\": " << (uintptr_t)login_token <<
+			" }";
+	} catch (std::exception& e) {
+		LOG(ERROR) << "Rfa::Exception: { "
+			"\"What\": \"" << e.what() << "\""
 			" }";
 	}
 }
@@ -338,6 +367,10 @@ gomi::client_t::RejectLogin (
 			"MMT_LOGIN::InvalidUsageException: { " <<
 			   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			", " << response <<
+			" }";
+	} catch (std::exception& e) {
+		LOG(ERROR) << "Rfa::Exception: { "
+			"\"What\": \"" << e.what() << "\""
 			" }";
 	}
 
@@ -451,10 +484,30 @@ gomi::client_t::AcceptLogin (
 			   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			", " << response <<
 			" }";
+	} catch (std::exception& e) {
+		LOG(ERROR) << "Rfa::Exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
 	}
 
 	Submit (&response, login_token, nullptr);
 	cumulative_stats_[CLIENT_PC_MMT_LOGIN_ACCEPTED]++;
+
+/* save new token for closing the session. */
+	login_token_  = login_token;
+
+/* registered for outage recording. */
+	if (!is_logged_in_) {
+		auto it = provider_->cool_.find (name_);
+		if (rfa::rdm::USER_NAME == login_msg.getAttribInfo().getNameType() &&
+			provider_->cool_.end() != it)
+		{
+			cool_ = it->second;
+			cool_->OnRecovery();
+			DLOG(INFO) << prefix_ << "OnRecovery:" << *cool_.get();
+		}		
+		is_logged_in_ = true;
+	}	
 	return true;
 }
 
@@ -485,6 +538,10 @@ gomi::client_t::OnDirectoryRequest (
 			  "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			", " << request_msg <<
 			", \"RequestToken\": " << (intptr_t)&request_token <<
+			" }";
+	} catch (std::exception& e) {
+		LOG(ERROR) << "Rfa::Exception: { "
+			"\"What\": \"" << e.what() << "\""
 			" }";
 	}
 
@@ -546,6 +603,10 @@ gomi::client_t::OnDirectoryRequest (
 		LOG(ERROR) << prefix_ << "MMT_DIRECTORY::InvalidUsageException: { "
 				"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 				" }";
+	} catch (std::exception& e) {
+		LOG(ERROR) << "Rfa::Exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
 	}
 }
 
@@ -654,6 +715,10 @@ gomi::client_t::OnItemRequest (
 				", " << request_msg <<
 				", \"RequestToken\": " << (uintptr_t)request_token <<
 				" }";
+	} catch (std::exception& e) {
+		LOG(ERROR) << "Rfa::Exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
 	}
 }
 
@@ -738,22 +803,25 @@ gomi::client_t::OnOMMInactiveClientSessionEvent (
 	const rfa::sessionLayer::OMMInactiveClientSessionEvent& session_event
 	)
 {
-	DCHECK(nullptr != handle_);
+	DCHECK (nullptr != handle_);
 	cumulative_stats_[CLIENT_PC_OMM_INACTIVE_CLIENT_SESSION_RECEIVED]++;
 	try {
-/* reject new item requests. */
-		is_logged_in_ = false;
 /* forward upstream to remove reference to this. */
-		provider_->EraseClientSession (handle_);
-/* handle is now invalid. */
+		auto tmp = handle_;
 		handle_ = nullptr;
+		provider_->EraseClientSession (tmp);
 /* ignore any error */
 	} catch (const rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[CLIENT_PC_OMM_INACTIVE_CLIENT_SESSION_EXCEPTION]++;
 		LOG(ERROR) << prefix_ << "OMMInactiveClientSession::InvalidUsageException: { "
 				"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 				" }";
+	} catch (std::exception& e) {
+		LOG(ERROR) << "Rfa::Exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
 	}
+	LOG(INFO) << "fin.";
 }
 
 /* 10.3.4 Providing Service Directory (Interactive)
@@ -791,6 +859,10 @@ gomi::client_t::SendDirectoryResponse (
 			"MMT_DIRECTORY::InvalidUsageException: { " <<
 			   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			", " << response <<
+			" }";
+	} catch (std::exception& e) {
+		LOG(ERROR) << "Rfa::Exception: { "
+			"\"What\": \"" << e.what() << "\""
 			" }";
 	}
 
@@ -869,6 +941,10 @@ gomi::client_t::SendClose (
 			"InvalidUsageException: { " <<
 			   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			", " << response <<
+			" }";
+	} catch (std::exception& e) {
+		LOG(ERROR) << "Rfa::Exception: { "
+			"\"What\": \"" << e.what() << "\""
 			" }";
 	}
 #endif
