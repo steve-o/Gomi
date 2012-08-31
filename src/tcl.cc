@@ -30,11 +30,13 @@ static const char* kDefaultTickVolumeField = "TickVolume";
 static const char* kBasicApi     = "gomi_query";
 static const char* kFeedLogApi   = "gomi_feedlog";
 static const char* kHistogramApi = "gomi_histogram";
+static const char* kCoolApi      = "gomi_cool";
 
 static const char* kTclApi[] = {
 	kBasicApi,
 	kFeedLogApi,
-	kHistogramApi
+	kHistogramApi,
+	kCoolApi
 };
 
 /* Register Tcl API.
@@ -111,6 +113,8 @@ gomi::gomi_t::execute (
 			retval = TclFeedLogQuery (cmdInfo, cmdData);
 		else if (0 == strcmp (command, kHistogramApi))
 			retval = TclHistogramDump (cmdInfo, cmdData);
+		else if (0 == strcmp (command, kCoolApi))
+			retval = TclCoolDump (cmdInfo, cmdData);
 		else
 			Tcl_SetResult (interp, "unknown function", TCL_STATIC);
 	}
@@ -503,6 +507,25 @@ gomi::gomi_t::TclHistogramDump (
 
 	if ((bool)recorder_)
 		recorder_->WriteGraph ("", &output);
+
+	Tcl_Obj* resultPtr = Tcl_NewStringObj (output.c_str(), output.size());
+	Tcl_SetObjResult (interp, resultPtr);
+
+	return TCL_OK;
+}
+
+int
+gomi::gomi_t::TclCoolDump (
+	const vpf::CommandInfo& cmdInfo,
+	vpf::TCLCommandData& cmdData
+	)
+{
+	TCLLibPtrs* tclStubsPtr = (TCLLibPtrs*)cmdData.mClientData;
+	Tcl_Interp* interp = cmdData.mInterp;		/* Current interpreter. */
+	std::string output;
+
+	if ((bool)provider_)
+		provider_->WriteCoolTables (&output);
 
 	Tcl_Obj* resultPtr = Tcl_NewStringObj (output.c_str(), output.size());
 	Tcl_SetObjResult (interp, resultPtr);

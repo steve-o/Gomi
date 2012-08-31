@@ -151,6 +151,7 @@ namespace gomi
 		int TclGomiQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 		int TclFeedLogQuery (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 		int TclHistogramDump (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
+		int TclCoolDump (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData);
 
 /* Unique instance number per process. */
 		LONG instance_;
@@ -178,14 +179,20 @@ namespace gomi
 		friend Netsnmp_Next_Data_Point gomiPluginTable_get_next_data_point;
 		friend Netsnmp_Node_Handler gomiPluginTable_handler;
 
-		friend Netsnmp_Next_Data_Point gomiPluginPerformanceTable_get_next_data_point;
-		friend Netsnmp_Node_Handler gomiPluginPerformanceTable_handler;
+		friend Netsnmp_Next_Data_Point gomiPerformanceTable_get_next_data_point;
+		friend Netsnmp_Node_Handler gomiPerformanceTable_handler;
 
 		friend Netsnmp_First_Data_Point gomiClientTable_get_first_data_point;
 		friend Netsnmp_Next_Data_Point gomiClientTable_get_next_data_point;
 
 		friend Netsnmp_First_Data_Point gomiClientPerformanceTable_get_first_data_point;
 		friend Netsnmp_Next_Data_Point gomiClientPerformanceTable_get_next_data_point;
+
+		friend Netsnmp_First_Data_Point gomiOutageMeasurementTable_get_first_data_point;
+		friend Netsnmp_Next_Data_Point gomiOutageMeasurementTable_get_next_data_point;
+
+		friend Netsnmp_First_Data_Point gomiOutageEventTable_get_first_data_point;
+		friend Netsnmp_Next_Data_Point gomiOutageEventTable_get_next_data_point;
 #endif /* GOMIMIB_H */
 
 /* RFA context. */

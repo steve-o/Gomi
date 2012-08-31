@@ -47,7 +47,7 @@ to_unix_epoch (
 gomi::cool_t::~cool_t()
 {
 	const auto now (boost::posix_time::second_clock::universal_time());
-	event_t final_duration (name_.c_str(), transition_time_, now, is_online_);
+	event_t final_duration (event_id_++, name_.c_str(), transition_time_, now, is_online_);
 	events_.push_back (final_duration);
 	if (!is_online_) accumulated_outage_time_ += now - transition_time_;
 }
@@ -69,7 +69,7 @@ gomi::cool_t::OnRecovery()
 	CHECK (!is_online_);
 	const auto now (boost::posix_time::second_clock::universal_time());
 	boost::unique_lock<boost::shared_mutex> (events_lock_);
-	event_t outage (name_.c_str(), transition_time_, now, is_online_);
+	event_t outage (event_id_++, name_.c_str(), transition_time_, now, is_online_);
 	events_.push_back (outage);
 /* start of UP duration */
 	is_online_ = true;
@@ -84,7 +84,7 @@ gomi::cool_t::OnOutage()
 	CHECK (is_online_);
 	const auto now (boost::posix_time::second_clock::universal_time());
 	boost::unique_lock<boost::shared_mutex> (events_lock_);
-	event_t online (name_.c_str(), transition_time_, now, is_online_);
+	event_t online (event_id_++, name_.c_str(), transition_time_, now, is_online_);
 	events_.push_back (online);
 /* start of DOWN duration */
 	is_online_ = false;
@@ -141,7 +141,10 @@ gomi::provider_t::provider_t (
 	config_ (config),
 	rfa_ (rfa),
 	event_queue_ (event_queue),
+	connection_item_handle_ (nullptr),
+	listen_item_handle_ (nullptr),
 	error_item_handle_ (nullptr),
+	event_id_ (0),
 	min_rwf_version_ (0),
 	service_id_ (0),
 	response_ (false),	/* reference */
@@ -190,11 +193,6 @@ void
 gomi::provider_t::Clear()
 {
 	VLOG(3) << "Unregistering " << clients_.size() << " RFA session clients.";
-	std::for_each (clients_.begin(), clients_.end(), [this](const std::pair<rfa::common::Handle*const, std::shared_ptr<client_t>>& client)
-	{
-		CHECK ((bool)client.second);
-		omm_provider_->unregisterClient (client.first);
-	});
 	clients_.clear();
 /* 0mq context */
 	CHECK (request_sock_.use_count() <= 1);
@@ -287,7 +285,7 @@ gomi::provider_t::Init()
 /* pre-registered client logins. */
 		for (auto it = config_.clients.begin(); it != config_.clients.end(); ++it)
 		{
-			auto cool = std::make_shared<cool_t> (it->name, *events_.get(), events_lock_);
+			auto cool = std::make_shared<cool_t> (it->name, *events_.get(), events_lock_, event_id_);
 			CHECK((bool)cool);
 			cool_.emplace (std::make_pair (it->name, std::move (cool)));
 		}
@@ -409,6 +407,66 @@ gomi::provider_t::processEvent (
 		LOG(WARNING) << "Uncaught: " << event_;
                 break;
         }
+}
+
+void
+gomi::provider_t::WriteCoolTables (
+	std::string* output
+	)
+{
+	CHECK (nullptr != output);
+	using namespace boost::posix_time;
+	const auto now (second_clock::universal_time());
+	output->append ("  ****  COOL Event Table ****\n\n\n");
+	output->append ("Index Event Interval  Event-Time           Client-Name\n\n");
+	if ((bool)events_) {
+		boost::shared_lock<boost::shared_mutex> lock (events_lock_);
+		for (auto it = events_->begin(); it != events_->end(); ++it) {
+			std::ostringstream oss;
+			oss << std::left
+			    << std::setw (5)
+			    << it->GetIndex()
+			    << ' '
+			    << std::setw (5)
+			    << (it->IsOnline() ? "UP" : "DOWN")
+			    << ' '
+			    << std::setw (9)
+			    << it->GetDuration().total_seconds()
+			    << ' '
+			    << std::setw (20)
+			    << it->GetStartTime()
+			    << std::setw (0)
+			    << ' '
+			    << it->GetLoginName()
+			    << '\n';
+			output->append (oss.str());
+		}
+	}
+	output->append ("\n\n");
+
+	output->append (" ****  COOL Object Table ****\n\n\n");
+	output->append ("Status AOT        NAF LAST-Change-Time     Client-Name\n\n");
+	for (auto it = cool_.begin(); it != cool_.end(); ++it) {
+		std::ostringstream oss;
+		auto sp = it->second;
+		oss << std::left
+		    << std::setw (6)
+		    << (sp->IsOnline() ? "UP" : "DOWN")
+		    << ' '
+		    << std::setw (10)
+		    << sp->GetAccumulatedOutageTime (now).total_seconds()
+		    << ' '
+		    << std::setw (3)
+		    << sp->GetAccumulatedFailures()
+		    << ' '
+		    << std::setw (20)
+		    << sp->GetLastChangeTime()
+		    << std::setw (0)
+		    << ' '
+		    << sp->GetLoginName()
+		    << '\n';
+		output->append (oss.str());
+	}
 }
 
 /* 7.4.7.4 Handling Listener Connection Events (new connection events).

@@ -60,11 +60,11 @@ static Netsnmp_First_Data_Point gomiPluginTable_get_first_data_point;
 static Netsnmp_Next_Data_Point gomiPluginTable_get_next_data_point;
 static Netsnmp_Free_Loop_Context gomiPluginTable_free_loop_context;
 
-static int initialize_table_gomiPluginPerformanceTable(void);
-static Netsnmp_Node_Handler gomiPluginPerformanceTable_handler;
-static Netsnmp_First_Data_Point gomiPluginPerformanceTable_get_first_data_point;
-static Netsnmp_Next_Data_Point gomiPluginPerformanceTable_get_next_data_point;
-static Netsnmp_Free_Loop_Context gomiPluginPerformanceTable_free_loop_context;
+static int initialize_table_gomiPerformanceTable(void);
+static Netsnmp_Node_Handler gomiPerformanceTable_handler;
+static Netsnmp_First_Data_Point gomiPerformanceTable_get_first_data_point;
+static Netsnmp_Next_Data_Point gomiPerformanceTable_get_next_data_point;
+static Netsnmp_Free_Loop_Context gomiPerformanceTable_free_loop_context;
 
 static int initialize_table_gomiClientTable(void);
 static Netsnmp_Node_Handler gomiClientTable_handler;
@@ -78,23 +78,51 @@ static Netsnmp_First_Data_Point gomiClientPerformanceTable_get_first_data_point;
 static Netsnmp_Next_Data_Point gomiClientPerformanceTable_get_next_data_point;
 static Netsnmp_Free_Loop_Context gomiClientPerformanceTable_free_loop_context;
 
+static int initialize_table_gomiOutageMeasurementTable(void);
+static Netsnmp_Node_Handler gomiOutageMeasurementTable_handler;
+static Netsnmp_First_Data_Point gomiOutageMeasurementTable_get_first_data_point;
+static Netsnmp_Next_Data_Point gomiOutageMeasurementTable_get_next_data_point;
+static Netsnmp_Free_Loop_Context gomiOutageMeasurementTable_free_loop_context;
+
+static int initialize_table_gomiOutageEventTable(void);
+static Netsnmp_Node_Handler gomiOutageEventTable_handler;
+static Netsnmp_First_Data_Point gomiOutageEventTable_get_first_data_point;
+static Netsnmp_Next_Data_Point gomiOutageEventTable_get_next_data_point;
+static Netsnmp_Free_Loop_Context gomiOutageEventTable_free_loop_context;
+
+/* Convert Posix time to Unix Epoch time.
+ */
+template< typename TimeT >
+inline
+TimeT
+to_unix_epoch (
+	const boost::posix_time::ptime t
+	)
+{
+	return (t - boost::posix_time::ptime (kUnixEpoch)).total_seconds();
+}
+
 /* Context during a SNMP query, lock on global list of gomi_t objects and iterator.
  */
 class snmp_context_t
 {
 public:
-	snmp_context_t (boost::shared_mutex& lock_, std::list<gomi::gomi_t*>& list_) :
-		lock (lock_),
-		gomi_list (list_),
+	snmp_context_t (boost::shared_mutex& gomi_lock_, std::list<gomi::gomi_t*>& gomi_list_) :
+		gomi_lock (gomi_lock_),
+		gomi_list (gomi_list_),
 		gomi_it (gomi_list.begin())
 	{
 	}
 
 /* Plugins are owned by AE, locking is required. */
-	boost::shared_lock<boost::shared_mutex> lock;
+	boost::shared_lock<boost::shared_mutex> gomi_lock;
 	std::list<gomi::gomi_t*>& gomi_list;
 	std::list<gomi::gomi_t*>::iterator gomi_it;
+	boost::shared_lock<boost::shared_mutex> clients_lock;
 	boost::unordered_map<rfa::common::Handle*const, std::shared_ptr<client_t>>::iterator client_it;
+	boost::unordered_map<std::string, std::shared_ptr<cool_t>>::iterator cool_it;
+	boost::shared_lock<boost::shared_mutex> events_lock;
+	boost::circular_buffer<event_t>::iterator event_it;
 
 /* SNMP agent is not-reentrant, ignore locking. */
 	static std::list<std::shared_ptr<snmp_context_t>> global_list;
@@ -112,8 +140,8 @@ init_gomiMIB(void)
 		LOG(ERROR) << "gomiPluginTable registration: see SNMP log for further details.";
 		return false;
 	}
-	if (MIB_REGISTERED_OK != initialize_table_gomiPluginPerformanceTable()) {
-		LOG(ERROR) << "gomiPluginPerformanceTable registration: see SNMP log for further details.";
+	if (MIB_REGISTERED_OK != initialize_table_gomiPerformanceTable()) {
+		LOG(ERROR) << "gomiPerformanceTable registration: see SNMP log for further details.";
 		return false;
 	}
 	if (MIB_REGISTERED_OK != initialize_table_gomiClientTable()) {
@@ -122,6 +150,14 @@ init_gomiMIB(void)
 	}
 	if (MIB_REGISTERED_OK != initialize_table_gomiClientPerformanceTable()) {
 		LOG(ERROR) << "gomiClientPerformanceTable registration: see SNMP log for further details.";
+		return false;
+	}
+	if (MIB_REGISTERED_OK != initialize_table_gomiOutageMeasurementTable()) {
+		LOG(ERROR) << "gomiOutageMeasurementTable registration: see SNMP log for further details.";
+		return false;
+	}
+	if (MIB_REGISTERED_OK != initialize_table_gomiOutageEventTable()) {
+		LOG(ERROR) << "gomiOutageEventTable registration: see SNMP log for further details.";
 		return false;
 	}
 	return true;
@@ -154,7 +190,6 @@ initialize_table_gomiPluginTable(void)
 		goto error;
 	netsnmp_table_helper_add_indexes (table_info,
 					  ASN_OCTET_STR,  /* index: gomiPluginId */
-					  ASN_UNSIGNED,  /* index: gomiPluginUniqueInstance */
 					  0);
 	table_info->min_column = COLUMN_GOMIPLUGINWINDOWSREGISTRYKEY;
 	table_info->max_column = COLUMN_GOMIPLUGINDEFAULTDAYCOUNT;
@@ -242,10 +277,6 @@ gomiPluginTable_get_next_data_point (
 	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)gomi->plugin_id_.c_str(), gomi->plugin_id_.length());
         idx = idx->next_variable;
 
-/* gomiPluginUniqueInstance */
-	const unsigned instance = gomi->instance_;
-	snmp_set_var_typed_value (idx, ASN_UNSIGNED, (const u_char*)&instance, sizeof (instance));
-
 /* reference remains in list */
         *my_data_context = (void*)gomi;
         return put_index_data;
@@ -261,7 +292,7 @@ gomiPluginTable_free_loop_context (
 	assert (nullptr != my_loop_context);
 	assert (nullptr != mydata);
 
-	DLOG(INFO) << "gomiPluginTable_free_loop_context ()";
+	DLOG(INFO) << "gomiPluginTable_free_loop_context()";
 
 /* delete context and shared lock on global list of all gomi objects */
 	snmp_context_t* context = static_cast<snmp_context_t*>(my_loop_context);
@@ -402,23 +433,23 @@ gomiPluginTable_handler (
 	return SNMP_ERR_NOERROR;
 }
 
-/* Initialize the gomiPluginPerformanceTable table by defining its contents and how it's structured
+/* Initialize the gomiPerformanceTable table by defining its contents and how it's structured
 */
 static
 int
-initialize_table_gomiPluginPerformanceTable(void)
+initialize_table_gomiPerformanceTable(void)
 {
-	DLOG(INFO) << "initialize_table_gomiPluginPerformanceTable()";
+	DLOG(INFO) << "initialize_table_gomiPerformanceTable()";
 
-	static const oid gomiPluginPerformanceTable_oid[] = {1,3,6,1,4,1,67,3,2,4};
-	const size_t gomiPluginPerformanceTable_oid_len = OID_LENGTH(gomiPluginPerformanceTable_oid);
+	static const oid gomiPerformanceTable_oid[] = {1,3,6,1,4,1,67,3,2,4};
+	const size_t gomiPerformanceTable_oid_len = OID_LENGTH(gomiPerformanceTable_oid);
 	netsnmp_handler_registration* reg = nullptr;
 	netsnmp_iterator_info* iinfo = nullptr;
 	netsnmp_table_registration_info* table_info = nullptr;
 
 	reg = netsnmp_create_handler_registration (
-		"gomiPluginPerformanceTable",   gomiPluginPerformanceTable_handler,
-		gomiPluginPerformanceTable_oid, gomiPluginPerformanceTable_oid_len,
+		"gomiPerformanceTable",   gomiPerformanceTable_handler,
+		gomiPerformanceTable_oid, gomiPerformanceTable_oid_len,
 		HANDLER_CAN_RONLY
 		);
 	if (nullptr == reg)
@@ -428,8 +459,7 @@ initialize_table_gomiPluginPerformanceTable(void)
 	if (nullptr == table_info)
 		goto error;
 	netsnmp_table_helper_add_indexes (table_info,
-					  ASN_OCTET_STR,  /* index: gomiPluginPerformanceId */
-					  ASN_UNSIGNED,  /* index: gomiPluginPerformanceInstance */
+					  ASN_OCTET_STR,  /* index: gomiPerformancePluginId */
 					  0);
 	table_info->min_column = COLUMN_GOMITCLQUERYRECEIVED;
 	table_info->max_column = COLUMN_GOMILASTMSGSSENT;
@@ -437,9 +467,9 @@ initialize_table_gomiPluginPerformanceTable(void)
 	iinfo = SNMP_MALLOC_TYPEDEF( netsnmp_iterator_info );
 	if (nullptr == iinfo)
 		goto error;
-	iinfo->get_first_data_point	= gomiPluginPerformanceTable_get_first_data_point;
-	iinfo->get_next_data_point	= gomiPluginPerformanceTable_get_next_data_point;
-	iinfo->free_loop_context_at_end = gomiPluginPerformanceTable_free_loop_context;
+	iinfo->get_first_data_point	= gomiPerformanceTable_get_first_data_point;
+	iinfo->get_next_data_point	= gomiPerformanceTable_get_next_data_point;
+	iinfo->free_loop_context_at_end = gomiPerformanceTable_free_loop_context;
 	iinfo->table_reginfo		= table_info;
     
 	return netsnmp_register_table_iterator (reg, iinfo);
@@ -457,7 +487,7 @@ error:
  */
 static
 netsnmp_variable_list*
-gomiPluginPerformanceTable_get_first_data_point (
+gomiPerformanceTable_get_first_data_point (
 	void**			my_loop_context,	/* valid through one query of multiple "data points" */
 	void**			my_data_context,	/* answer blob which is passed to handler() */
 	netsnmp_variable_list*	put_index_data,		/* answer */
@@ -469,7 +499,7 @@ gomiPluginPerformanceTable_get_first_data_point (
 	assert (nullptr != put_index_data);
 	assert (nullptr != mydata);
 
-	DLOG(INFO) << "gomiPluginPerformanceTable_get_first_data_point()";
+	DLOG(INFO) << "gomiPerformanceTable_get_first_data_point()";
 
 /* Create our own context for this SNMP loop, lock on list follows lifetime of context */
 	std::shared_ptr<snmp_context_t> context (new snmp_context_t (gomi::gomi_t::global_list_lock_, gomi::gomi_t::global_list_));
@@ -483,12 +513,12 @@ gomiPluginPerformanceTable_get_first_data_point (
 	snmp_context_t::global_list.push_back (std::move (context));
 
 /* pass on for generic row access */
-	return gomiPluginPerformanceTable_get_next_data_point(my_loop_context, my_data_context, put_index_data, mydata);
+	return gomiPerformanceTable_get_next_data_point(my_loop_context, my_data_context, put_index_data, mydata);
 }
 
 static
 netsnmp_variable_list*
-gomiPluginPerformanceTable_get_next_data_point (
+gomiPerformanceTable_get_next_data_point (
 	void**			my_loop_context,
 	void**			my_data_context,
 	netsnmp_variable_list*	put_index_data,
@@ -500,7 +530,7 @@ gomiPluginPerformanceTable_get_next_data_point (
 	assert (nullptr != put_index_data);
 	assert (nullptr != mydata);
 
-	DLOG(INFO) << "gomiPluginPerformanceTable_get_next_data_point()";
+	DLOG(INFO) << "gomiPerformanceTable_get_next_data_point()";
 
 	snmp_context_t* context = static_cast<snmp_context_t*>(*my_loop_context);
 	netsnmp_variable_list *idx = put_index_data;
@@ -514,13 +544,9 @@ gomiPluginPerformanceTable_get_next_data_point (
 /* this plugin instance as a data point */
 	const gomi::gomi_t* gomi = *context->gomi_it++;
 
-/* gomiPluginPerformanceId */
+/* gomiPerformancePluginId */
 	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)gomi->plugin_id_.c_str(), gomi->plugin_id_.length());
         idx = idx->next_variable;
-
-/* gomiPluginPerformanceInstance */
-	const unsigned instance = gomi->instance_;
-	snmp_set_var_typed_value (idx, ASN_UNSIGNED, (const u_char*)&instance, sizeof (instance));
 
 /* reference remains in list */
         *my_data_context = (void*)gomi;
@@ -529,7 +555,7 @@ gomiPluginPerformanceTable_get_next_data_point (
 
 static
 void
-gomiPluginPerformanceTable_free_loop_context (
+gomiPerformanceTable_free_loop_context (
 	void*			my_loop_context,
 	netsnmp_iterator_info*	mydata
 	)
@@ -537,7 +563,7 @@ gomiPluginPerformanceTable_free_loop_context (
 	assert (nullptr != my_loop_context);
 	assert (nullptr != mydata);
 
-	DLOG(INFO) << "gomiPluginPerformanceTable_free_loop_context()";
+	DLOG(INFO) << "gomiPerformanceTable_free_loop_context()";
 
 /* delete context and shared lock on global list of all gomi objects */
 	snmp_context_t* context = static_cast<snmp_context_t*>(my_loop_context);
@@ -549,11 +575,11 @@ gomiPluginPerformanceTable_free_loop_context (
 	}));
 }
 
-/* handles requests for the gomiPluginPerformanceTable table
+/* handles requests for the gomiPerformanceTable table
  */
 static
 int
-gomiPluginPerformanceTable_handler (
+gomiPerformanceTable_handler (
 	netsnmp_mib_handler*		handler,
 	netsnmp_handler_registration*	reginfo,
 	netsnmp_agent_request_info*	reqinfo,
@@ -565,7 +591,7 @@ gomiPluginPerformanceTable_handler (
 	assert (nullptr != reqinfo);
 	assert (nullptr != requests);
 
-	DLOG(INFO) << "gomiPluginPerformanceTable_handler()";
+	DLOG(INFO) << "gomiPerformanceTable_handler()";
 
 	switch (reqinfo->mode) {
         
@@ -585,7 +611,7 @@ gomiPluginPerformanceTable_handler (
 			netsnmp_variable_list* var = request->requestvb;
 			netsnmp_table_request_info* table_info  = netsnmp_extract_table_info (request);
 			if (nullptr == table_info) {
-				snmp_log (__netsnmp_LOG_ERR, "gomiPluginPerformanceTable_handler: empty table request info.\n");
+				snmp_log (__netsnmp_LOG_ERR, "gomiPerformanceTable_handler: empty table request info.\n");
 				continue;
 			}
     
@@ -701,7 +727,7 @@ gomiPluginPerformanceTable_handler (
 				break;
 
 			default:
-				snmp_log (__netsnmp_LOG_ERR, "gomiPluginPerformanceTable_handler: unknown column.\n");
+				snmp_log (__netsnmp_LOG_ERR, "gomiPerformanceTable_handler: unknown column.\n");
 				netsnmp_set_request_error (reqinfo, request, SNMP_NOSUCHOBJECT);
 				break;
 			}
@@ -709,7 +735,7 @@ gomiPluginPerformanceTable_handler (
 		break;
 
 	default:
-		snmp_log (__netsnmp_LOG_ERR, "gomiPluginPerformanceTable_handler: unsupported mode.\n");
+		snmp_log (__netsnmp_LOG_ERR, "gomiPerformanceTable_handler: unsupported mode.\n");
 		break;
     }
 
@@ -743,11 +769,10 @@ initialize_table_gomiClientTable(void)
 		goto error;
 	netsnmp_table_helper_add_indexes (table_info,
 					  ASN_OCTET_STR,  /* index: gomiClientPluginId */
-					  ASN_UNSIGNED,  /* index: gomiClientPluginInstance */
-					  ASN_OCTET_STR,  /* index: gomiClientUniqueInstance */
+					  ASN_OCTET_STR,  /* index: gomiClientHandle */
 					  0);
-	table_info->min_column = COLUMN_GOMICLIENTIPADDRESS;
-	table_info->max_column = COLUMN_GOMICLIENTLOGINNAME;
+	table_info->min_column = COLUMN_GOMICLIENTLOGINNAME;
+	table_info->max_column = COLUMN_GOMICLIENTPUBLISHERNAME;
     
 	iinfo = SNMP_MALLOC_TYPEDEF (netsnmp_iterator_info);
 	if (nullptr == iinfo)
@@ -797,15 +822,18 @@ gomiClientTable_get_first_data_point (
 		context->gomi_it != context->gomi_list.end();
 		++(context->gomi_it))
 	{
+		boost::shared_lock<boost::shared_mutex> lock ((*context->gomi_it)->provider_->clients_lock_);
 /* and through all sessions for each plugin provider. */
 		context->client_it = (*context->gomi_it)->provider_->clients_.begin();
 		if (context->client_it != (*context->gomi_it)->provider_->clients_.end()) {
+			context->clients_lock.swap (lock);
 			break;
 		}
 	}
 
 /* no node found. */
-	if (context->client_it == (*context->gomi_it)->provider_->clients_.end()) {
+	if (context->gomi_it == context->gomi_list.end() ||
+	    context->client_it == (*context->gomi_it)->provider_->clients_.end()) {
 		DLOG(INFO) << "No client session instances.";
 		return nullptr;
 	}
@@ -855,19 +883,17 @@ gomiClientTable_get_next_data_point (
 	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)gomi->plugin_id_.c_str(), gomi->plugin_id_.length());
         idx = idx->next_variable;
 
-/* gomiClientPluginUniqueInstance */
-	const unsigned instance = gomi->instance_;
-	snmp_set_var_typed_value (idx, ASN_UNSIGNED, (const u_char*)&instance, sizeof (instance));
-        idx = idx->next_variable;
-
-/* gomiClientUniqueInstance */
+/* gomiClientHandle */
 	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)client->prefix_.c_str(), client->prefix_.length() - 1);
 
 /* hunt for next valid node */
 	while (++(context->client_it) == (*context->gomi_it)->provider_->clients_.end()) {
+		context->clients_lock.unlock ();
 		if (++(context->gomi_it) == context->gomi_list.end()) {
 			break;
 		}
+		boost::shared_lock<boost::shared_mutex> lock ((*context->gomi_it)->provider_->clients_lock_);
+		context->clients_lock.swap (lock);
 		context->client_it = (*context->gomi_it)->provider_->clients_.begin();
 	}
 
@@ -941,6 +967,11 @@ gomiClientTable_handler (
 			const auto& config = client->provider_->config_;
 			switch (table_info->colnum) {
 						
+			case COLUMN_GOMICLIENTLOGINNAME:
+				snmp_set_var_typed_value (var, ASN_OCTET_STR,
+					(const u_char*)client->name_.c_str(), client->name_.length());
+				break;
+
 			case COLUMN_GOMICLIENTIPADDRESS:
 				snmp_set_var_typed_value (var, ASN_OCTET_STR,
 					(const u_char*)client->address_.c_str(), client->address_.length());
@@ -964,11 +995,6 @@ gomiClientTable_handler (
 			case COLUMN_GOMICLIENTPUBLISHERNAME:
 				snmp_set_var_typed_value (var, ASN_OCTET_STR,
 					(const u_char*)config.sessions[0].publisher_name.c_str(), config.sessions[0].publisher_name.length());
-				break;
-
-			case COLUMN_GOMICLIENTLOGINNAME:
-				snmp_set_var_typed_value (var, ASN_OCTET_STR,
-					(const u_char*)client->name_.c_str(), client->name_.length());
 				break;
 
 			default:
@@ -1013,8 +1039,7 @@ initialize_table_gomiClientPerformanceTable(void)
 		goto error;
 	netsnmp_table_helper_add_indexes (table_info,
 					  ASN_OCTET_STR,  /* index: gomiClientPerformancePluginId */
-					  ASN_UNSIGNED,  /* index: gomiClientPerformancePluginUniqueInstance */
-					  ASN_OCTET_STR,  /* index: gomiClientPerformanceUniqueInstance */
+					  ASN_OCTET_STR,  /* index: gomiClientPerformanceHandle */
 					  0);
 	table_info->min_column = COLUMN_GOMICLIENTLASTACTIVITY;
 	table_info->max_column = COLUMN_GOMIOMMINACTIVECLIENTSESSIONEXCEPTION;
@@ -1068,15 +1093,18 @@ gomiClientPerformanceTable_get_first_data_point (
 		context->gomi_it != context->gomi_list.end();
 		++(context->gomi_it))
 	{
+		boost::shared_lock<boost::shared_mutex> lock ((*context->gomi_it)->provider_->clients_lock_);
 /* and through all sessions for each plugin provider. */
 		context->client_it = (*context->gomi_it)->provider_->clients_.begin();
 		if (context->client_it != (*context->gomi_it)->provider_->clients_.end()) {
+			context->clients_lock.swap (lock);
 			break;
 		}
 	}
 
 /* no node found. */
-	if (context->client_it == (*context->gomi_it)->provider_->clients_.end()) {
+	if (context->gomi_it == context->gomi_list.end() ||
+	    context->client_it == (*context->gomi_it)->provider_->clients_.end()) {
 		DLOG(INFO) << "No client session instances.";
 		return nullptr;
 	}
@@ -1126,19 +1154,17 @@ gomiClientPerformanceTable_get_next_data_point (
 	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)gomi->plugin_id_.c_str(), gomi->plugin_id_.length());
         idx = idx->next_variable;
 
-/* gomiClientPerformancePluginUniqueInstance */
-	const unsigned instance = gomi->instance_;
-	snmp_set_var_typed_value (idx, ASN_UNSIGNED, (const u_char*)&instance, sizeof (instance));
-        idx = idx->next_variable;
-
-/* gomiClientPerformanceUniqueInstance */
+/* gomiClientPerformanceHandle */
 	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)client->prefix_.c_str(), client->prefix_.length() - 1);
 
 /* hunt for next valid node */
 	while (++(context->client_it) == (*context->gomi_it)->provider_->clients_.end()) {
+		context->clients_lock.unlock ();
 		if (++(context->gomi_it) == context->gomi_list.end()) {
 			break;
 		}
+		boost::shared_lock<boost::shared_mutex> lock ((*context->gomi_it)->provider_->clients_lock_);
+		context->clients_lock.swap (lock);
 		context->client_it = (*context->gomi_it)->provider_->clients_.begin();
 	}
 
@@ -1561,6 +1587,549 @@ gomiClientPerformanceTable_handler (
 
 	default:
 		snmp_log (__netsnmp_LOG_ERR, "gomiClientPerformanceTable_handler: unsupported mode.\n");
+		break;
+    }
+
+    return SNMP_ERR_NOERROR;
+}
+
+/* Initialize the gomiOutageMeasurementTable table by defining its contents and how it's structured
+*/
+static
+int
+initialize_table_gomiOutageMeasurementTable(void)
+{
+	DLOG(INFO) << "initialize_table_gomiOutageMeasurementTable()";
+
+	static const oid gomiOutageMeasurementTable_oid[] = {1,3,6,1,4,1,67,3,2,7};
+	const size_t gomiOutageMeasurementTable_oid_len = OID_LENGTH(gomiOutageMeasurementTable_oid);
+	netsnmp_handler_registration* reg = nullptr;
+	netsnmp_iterator_info* iinfo = nullptr;
+	netsnmp_table_registration_info* table_info = nullptr;
+
+	reg = netsnmp_create_handler_registration (
+		"gomiOutageMeasurementTable",   gomiOutageMeasurementTable_handler,
+		gomiOutageMeasurementTable_oid, gomiOutageMeasurementTable_oid_len,
+		HANDLER_CAN_RONLY
+		);
+	if (nullptr == reg)
+		goto error;
+
+	table_info = SNMP_MALLOC_TYPEDEF (netsnmp_table_registration_info);
+	if (nullptr == table_info)
+		goto error;
+	netsnmp_table_helper_add_indexes (table_info,
+					  ASN_OCTET_STR,  /* index: gomiOutageMeasurementPluginId */
+					  ASN_OCTET_STR,  /* index: gomiOutageMeasurementClientName */
+					  0);
+	table_info->min_column = COLUMN_GOMIACCUMULATEDOUTAGETIME;
+	table_info->max_column = COLUMN_GOMIRECORDINGSTARTTIME;
+    
+	iinfo = SNMP_MALLOC_TYPEDEF( netsnmp_iterator_info );
+	if (nullptr == iinfo)
+		goto error;
+	iinfo->get_first_data_point	= gomiOutageMeasurementTable_get_first_data_point;
+	iinfo->get_next_data_point	= gomiOutageMeasurementTable_get_next_data_point;
+	iinfo->free_loop_context_at_end = gomiOutageMeasurementTable_free_loop_context;
+	iinfo->table_reginfo		= table_info;
+    
+	return netsnmp_register_table_iterator (reg, iinfo);
+
+error:
+	if (table_info && table_info->indexes)		/* table_data_free_func() is internal */
+		snmp_free_var (table_info->indexes);
+	SNMP_FREE (table_info);
+	SNMP_FREE (iinfo);
+	netsnmp_handler_registration_free (reg);
+	return -1;
+}
+
+/* Example iterator hook routines - using 'get_next' to do most of the work
+ */
+static
+netsnmp_variable_list*
+gomiOutageMeasurementTable_get_first_data_point (
+	void**			my_loop_context,	/* valid through one query of multiple "data points" */
+	void**			my_data_context,	/* answer blob which is passed to handler() */
+	netsnmp_variable_list*	put_index_data,		/* answer */
+	netsnmp_iterator_info*	mydata			/* iinfo on init() */
+	)
+{
+	assert (nullptr != my_loop_context);
+	assert (nullptr != my_data_context);
+	assert (nullptr != put_index_data);
+	assert (nullptr != mydata);
+
+	DLOG(INFO) << "gomiOutageMeasurementTable_get_first_data_point()";
+
+/* Create our own context for this SNMP loop, lock on list follows lifetime of context */
+	std::shared_ptr<snmp_context_t> context (new snmp_context_t (gomi::gomi_t::global_list_lock_, gomi::gomi_t::global_list_));
+	if (!(bool)context || context->gomi_list.empty()) {
+		DLOG(INFO) << "No plugin instances";
+		return nullptr;
+	}
+
+/* Find first node, through all plugin instances. */
+	for (context->gomi_it = context->gomi_list.begin();
+		context->gomi_it != context->gomi_list.end();
+		++(context->gomi_it))
+	{
+/* and through all sessions for each plugin provider. */
+		context->cool_it = (*context->gomi_it)->provider_->cool_.begin();
+		if (context->cool_it != (*context->gomi_it)->provider_->cool_.end()) {
+			break;
+		}
+	}
+
+/* no node found. */
+	if (context->gomi_it == context->gomi_list.end() ||
+	    context->cool_it == (*context->gomi_it)->provider_->cool_.end()) {
+		DLOG(INFO) << "No COOL instances.";
+		return nullptr;
+	}
+
+/* Save context with NET-SNMP iterator. */
+	*my_loop_context = context.get();
+	snmp_context_t::global_list.push_back (std::move (context));
+
+/* pass on for generic row access */
+	return gomiOutageMeasurementTable_get_next_data_point(my_loop_context, my_data_context, put_index_data, mydata);
+}
+
+static
+netsnmp_variable_list*
+gomiOutageMeasurementTable_get_next_data_point (
+	void**			my_loop_context,
+	void**			my_data_context,
+	netsnmp_variable_list*	put_index_data,
+	netsnmp_iterator_info*	mydata
+	)
+{
+	assert (nullptr != my_loop_context);
+	assert (nullptr != my_data_context);
+	assert (nullptr != put_index_data);
+	assert (nullptr != mydata);
+
+	DLOG(INFO) << "gomiOutageMeasurementTable_get_next_data_point()";
+
+	snmp_context_t* context = static_cast<snmp_context_t*>(*my_loop_context);
+	netsnmp_variable_list *idx = put_index_data;
+
+/* end of data points */
+	if (context->gomi_it == context->gomi_list.end()) {
+		DLOG(INFO) << "End of plugin instances.";
+		return nullptr;
+	}
+	if (context->cool_it == (*context->gomi_it)->provider_->cool_.end()) {
+		DLOG(INFO) << "End of client session instances.";
+		return nullptr;
+	}
+
+/* this plugin instance as a data point */
+	const gomi::cool_t* cool = (context->cool_it->second).get();
+	const gomi::gomi_t* gomi = *context->gomi_it;
+
+/* gomiOutageMeasurementPluginId */
+	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)gomi->plugin_id_.c_str(), gomi->plugin_id_.length());
+        idx = idx->next_variable;
+
+/* gomiOutageMeasurementClientName */
+	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)cool->GetLoginName().c_str(), cool->GetLoginName().length());
+
+/* hunt for next valid node */
+	while (++(context->cool_it) == (*context->gomi_it)->provider_->cool_.end()) {
+		if (++(context->gomi_it) == context->gomi_list.end()) {
+			break;
+		}
+		context->cool_it = (*context->gomi_it)->provider_->cool_.begin();
+	}
+
+/* reference remains in list */
+        *my_data_context = (void*)cool;
+	return put_index_data;
+}
+
+static
+void
+gomiOutageMeasurementTable_free_loop_context (
+	void*			my_loop_context,
+	netsnmp_iterator_info*	mydata
+	)
+{
+	assert (nullptr != my_loop_context);
+	assert (nullptr != mydata);
+
+	DLOG(INFO) << "gomiOutageMeasurementTable_free_loop_context()";
+
+/* delete context and shared lock on global list of all gomi objects */
+	snmp_context_t* context = static_cast<snmp_context_t*>(my_loop_context);
+/* I'm sure there must be a better method :-( */
+	snmp_context_t::global_list.erase (std::remove_if (snmp_context_t::global_list.begin(),
+		snmp_context_t::global_list.end(),
+		[context](std::shared_ptr<snmp_context_t>& shared_context) -> bool {
+			return shared_context.get() == context;
+	}));
+}
+
+/* handles requests for the gomiOutageMeasurementTable table
+ */
+static
+int
+gomiOutageMeasurementTable_handler (
+	netsnmp_mib_handler*		handler,
+	netsnmp_handler_registration*	reginfo,
+	netsnmp_agent_request_info*	reqinfo,
+	netsnmp_request_info*		requests
+	)
+{
+	assert (nullptr != handler);
+	assert (nullptr != reginfo);
+	assert (nullptr != reqinfo);
+	assert (nullptr != requests);
+
+	DLOG(INFO) << "gomiOutageMeasurementTable_handler()";
+	const auto now (boost::posix_time::second_clock::universal_time());
+
+	switch (reqinfo->mode) {
+        
+/* Read-support (also covers GetNext requests) */
+
+	case MODE_GET:
+		for (netsnmp_request_info* request = requests;
+		     request;
+		     request = request->next)
+		{
+			const gomi::cool_t* cool = static_cast<gomi::cool_t*>(netsnmp_extract_iterator_context (request));
+			if (nullptr == cool) {
+				netsnmp_set_request_error (reqinfo, request, SNMP_NOSUCHINSTANCE);
+				continue;
+			}
+
+			netsnmp_variable_list* var = request->requestvb;
+			netsnmp_table_request_info* table_info  = netsnmp_extract_table_info (request);
+			if (nullptr == table_info) {
+				snmp_log (__netsnmp_LOG_ERR, "gomiOutageMeasurementTable_handler: empty table request info.\n");
+				continue;
+			}
+    
+			switch (table_info->colnum) {
+
+			case COLUMN_GOMIACCUMULATEDOUTAGETIME:
+				{
+					const uint32_t outage_time = cool->GetAccumulatedOutageTime (now).total_seconds();
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&outage_time, sizeof (outage_time));
+				}
+				break;
+
+			case COLUMN_GOMACCUMULATEDFAILURES:
+				{
+					const unsigned NAF = cool->GetAccumulatedFailures();
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&NAF, sizeof (NAF));
+				}
+				break;
+
+			case COLUMN_GOMIRECORDINGSTARTTIME:
+				{
+					const uint32_t RST = to_unix_epoch<uint32_t> (cool->GetRecordingStartTime());
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&RST, sizeof (RST));
+				}
+				break;
+
+			default:
+				snmp_log (__netsnmp_LOG_ERR, "gomiOutageMeasurementTable_handler: unknown column.\n");
+				netsnmp_set_request_error (reqinfo, request, SNMP_NOSUCHOBJECT);
+				break;
+			}
+		}
+		break;
+
+	default:
+		snmp_log (__netsnmp_LOG_ERR, "gomiOutageMeasurementTable_handler: unsupported mode.\n");
+		break;
+    }
+
+    return SNMP_ERR_NOERROR;
+}
+
+/* Initialize the gomiOutageEventTable table by defining its contents and how it's structured
+*/
+static
+int
+initialize_table_gomiOutageEventTable(void)
+{
+	DLOG(INFO) << "initialize_table_gomiOutageEventTable()";
+
+	static const oid gomiOutageEventTable_oid[] = {1,3,6,1,4,1,67,3,2,8};
+	const size_t gomiOutageEventTable_oid_len = OID_LENGTH(gomiOutageEventTable_oid);
+	netsnmp_handler_registration* reg = nullptr;
+	netsnmp_iterator_info* iinfo = nullptr;
+	netsnmp_table_registration_info* table_info = nullptr;
+
+	reg = netsnmp_create_handler_registration (
+		"gomiOutageEventTable",   gomiOutageEventTable_handler,
+		gomiOutageEventTable_oid, gomiOutageEventTable_oid_len,
+		HANDLER_CAN_RONLY
+		);
+	if (nullptr == reg)
+		goto error;
+
+	table_info = SNMP_MALLOC_TYPEDEF (netsnmp_table_registration_info);
+	if (nullptr == table_info)
+		goto error;
+	netsnmp_table_helper_add_indexes (table_info,
+					  ASN_OCTET_STR,  /* index: gomiOutageEventPluginId */
+					  ASN_UNSIGNED,  /* index: gomiOutageEventId */
+					  0);
+	table_info->min_column = COLUMN_GOMIOUTAGECLIENTNAME;
+	table_info->max_column = COLUMN_GOMIOUTAGESTATE;
+    
+	iinfo = SNMP_MALLOC_TYPEDEF( netsnmp_iterator_info );
+	if (nullptr == iinfo)
+		goto error;
+	iinfo->get_first_data_point	= gomiOutageEventTable_get_first_data_point;
+	iinfo->get_next_data_point	= gomiOutageEventTable_get_next_data_point;
+	iinfo->free_loop_context_at_end = gomiOutageEventTable_free_loop_context;
+	iinfo->table_reginfo		= table_info;
+    
+	return netsnmp_register_table_iterator (reg, iinfo);
+
+error:
+	if (table_info && table_info->indexes)		/* table_data_free_func() is internal */
+		snmp_free_var (table_info->indexes);
+	SNMP_FREE (table_info);
+	SNMP_FREE (iinfo);
+	netsnmp_handler_registration_free (reg);
+	return -1;
+}
+
+/* Example iterator hook routines - using 'get_next' to do most of the work
+ */
+static
+netsnmp_variable_list*
+gomiOutageEventTable_get_first_data_point (
+	void**			my_loop_context,	/* valid through one query of multiple "data points" */
+	void**			my_data_context,	/* answer blob which is passed to handler() */
+	netsnmp_variable_list*	put_index_data,		/* answer */
+	netsnmp_iterator_info*	mydata			/* iinfo on init() */
+	)
+{
+	assert (nullptr != my_loop_context);
+	assert (nullptr != my_data_context);
+	assert (nullptr != put_index_data);
+	assert (nullptr != mydata);
+
+	DLOG(INFO) << "gomiOutageEventTable_get_first_data_point()";
+
+/* Create our own context for this SNMP loop, lock on list follows lifetime of context */
+	std::shared_ptr<snmp_context_t> context (new snmp_context_t (gomi::gomi_t::global_list_lock_, gomi::gomi_t::global_list_));
+	if (!(bool)context || context->gomi_list.empty()) {
+		DLOG(INFO) << "No plugin instances";
+		return nullptr;
+	}
+
+/* Find first node, through all plugin instances. */
+	for (context->gomi_it = context->gomi_list.begin();
+		context->gomi_it != context->gomi_list.end();
+		++(context->gomi_it))
+	{
+/* event recording disabled */
+		if (!(bool)((*context->gomi_it)->provider_->events_)) {
+			continue;
+		}
+		boost::shared_lock<boost::shared_mutex> lock ((*context->gomi_it)->provider_->events_lock_);
+/* and through all events for each plugin provider. */
+		context->event_it = (*context->gomi_it)->provider_->events_->begin();
+		if (context->event_it != (*context->gomi_it)->provider_->events_->end()) {
+			context->events_lock.swap (lock);
+			break;
+		}
+	}
+
+/* no node found. */
+	if (context->gomi_it == context->gomi_list.end() ||
+	    !(bool)(*context->gomi_it)->provider_->events_ ||
+	    context->event_it == (*context->gomi_it)->provider_->events_->end()) {
+		DLOG(INFO) << "No event instances.";
+		return nullptr;
+	}
+
+/* Save context with NET-SNMP iterator. */
+	*my_loop_context = context.get();
+	snmp_context_t::global_list.push_back (std::move (context));
+
+/* pass on for generic row access */
+	return gomiOutageEventTable_get_next_data_point(my_loop_context, my_data_context, put_index_data, mydata);
+}
+
+static
+netsnmp_variable_list*
+gomiOutageEventTable_get_next_data_point (
+	void**			my_loop_context,
+	void**			my_data_context,
+	netsnmp_variable_list*	put_index_data,
+	netsnmp_iterator_info*	mydata
+	)
+{
+	assert (nullptr != my_loop_context);
+	assert (nullptr != my_data_context);
+	assert (nullptr != put_index_data);
+	assert (nullptr != mydata);
+
+	DLOG(INFO) << "gomiOutageEventTable_get_next_data_point()";
+
+	snmp_context_t* context = static_cast<snmp_context_t*>(*my_loop_context);
+	netsnmp_variable_list *idx = put_index_data;
+
+/* end of data points */
+	if (context->gomi_it == context->gomi_list.end()) {
+		DLOG(INFO) << "End of plugin instances.";
+		return nullptr;
+	}
+	if (!(bool)((*context->gomi_it)->provider_->events_) ||
+	    context->event_it == (*context->gomi_it)->provider_->events_->end()) {
+		DLOG(INFO) << "End of event instances.";
+		return nullptr;
+	}
+
+/* this plugin instance as a data point */
+	const gomi::event_t* event = &(*context->event_it);
+	const gomi::gomi_t* gomi = *context->gomi_it;
+
+/* gomiOutageEventPluginId */
+	snmp_set_var_typed_value (idx, ASN_OCTET_STR, (const u_char*)gomi->plugin_id_.c_str(), gomi->plugin_id_.length());
+        idx = idx->next_variable;
+
+/* gomiOutageEventId */
+	const unsigned event_id = event->GetIndex();
+	snmp_set_var_typed_value (idx, ASN_UNSIGNED, (const u_char*)&event_id, sizeof (event_id));
+        idx = idx->next_variable;
+
+/* hunt for next valid node */
+	while (++(context->event_it) == (*context->gomi_it)->provider_->events_->end()) {
+		context->events_lock.unlock ();
+		while (++(context->gomi_it) != context->gomi_list.end()) {
+			if ((bool)(*context->gomi_it)->provider_->events_)
+				break;
+		}
+		if (context->gomi_it == context->gomi_list.end()) {
+			break;
+		}
+		DCHECK ((bool)((*context->gomi_it)->provider_->events_));
+		boost::shared_lock<boost::shared_mutex> lock ((*context->gomi_it)->provider_->events_lock_);
+		context->events_lock.swap (lock);
+		context->event_it = (*context->gomi_it)->provider_->events_->begin();
+	}
+
+/* reference remains in list */
+        *my_data_context = (void*)event;
+	return put_index_data;
+}
+
+static
+void
+gomiOutageEventTable_free_loop_context (
+	void*			my_loop_context,
+	netsnmp_iterator_info*	mydata
+	)
+{
+	assert (nullptr != my_loop_context);
+	assert (nullptr != mydata);
+
+	DLOG(INFO) << "gomiOutageEventTable_free_loop_context()";
+
+/* delete context and shared lock on global list of all gomi objects */
+	snmp_context_t* context = static_cast<snmp_context_t*>(my_loop_context);
+/* I'm sure there must be a better method :-( */
+	snmp_context_t::global_list.erase (std::remove_if (snmp_context_t::global_list.begin(),
+		snmp_context_t::global_list.end(),
+		[context](std::shared_ptr<snmp_context_t>& shared_context) -> bool {
+			return shared_context.get() == context;
+	}));
+}
+
+/* handles requests for the gomiOutageEventTable table
+ */
+static
+int
+gomiOutageEventTable_handler (
+	netsnmp_mib_handler*		handler,
+	netsnmp_handler_registration*	reginfo,
+	netsnmp_agent_request_info*	reqinfo,
+	netsnmp_request_info*		requests
+	)
+{
+	assert (nullptr != handler);
+	assert (nullptr != reginfo);
+	assert (nullptr != reqinfo);
+	assert (nullptr != requests);
+
+	DLOG(INFO) << "gomiOutageEventTable_handler()";
+
+	switch (reqinfo->mode) {
+        
+/* Read-support (also covers GetNext requests) */
+
+	case MODE_GET:
+		for (netsnmp_request_info* request = requests;
+		     request;
+		     request = request->next)
+		{
+			const gomi::event_t* event = static_cast<gomi::event_t*>(netsnmp_extract_iterator_context (request));
+			if (nullptr == event) {
+				netsnmp_set_request_error (reqinfo, request, SNMP_NOSUCHINSTANCE);
+				continue;
+			}
+
+			netsnmp_variable_list* var = request->requestvb;
+			netsnmp_table_request_info* table_info  = netsnmp_extract_table_info (request);
+			if (nullptr == table_info) {
+				snmp_log (__netsnmp_LOG_ERR, "gomiOutageEventTable_handler: empty table request info.\n");
+				continue;
+			}
+    
+			switch (table_info->colnum) {
+			case COLUMN_GOMIOUTAGECLIENTNAME:
+				snmp_set_var_typed_value (var, ASN_OCTET_STR,
+					(const u_char*)event->GetLoginName().c_str(), event->GetLoginName().length());
+				break;
+
+			case COLUMN_GOMIOUTAGESTARTTIME:
+				{
+					const uint32_t start_time = to_unix_epoch<uint32_t> (event->GetStartTime());
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&start_time, sizeof (start_time));
+				}
+				break;
+
+			case COLUMN_GOMIOUTAGEENDTIME:
+				{
+					const uint32_t end_time = to_unix_epoch<uint32_t> (event->GetEndTime());
+					snmp_set_var_typed_value (var, ASN_COUNTER, /* ASN_COUNTER32 */
+						(const u_char*)&end_time, sizeof (end_time));
+				}
+				break;
+            
+			case COLUMN_GOMIOUTAGESTATE:
+				{
+					const int event_state = event->IsOnline() ? 1 : 2;
+					snmp_set_var_typed_value (var, ASN_INTEGER,
+						(const u_char*)&event_state, sizeof (event_state));
+				}
+				break;
+
+			default:
+				snmp_log (__netsnmp_LOG_ERR, "gomiOutageEventTable_handler: unknown column.\n");
+				netsnmp_set_request_error (reqinfo, request, SNMP_NOSUCHOBJECT);
+				break;
+			}
+		}
+		break;
+
+	default:
+		snmp_log (__netsnmp_LOG_ERR, "gomiOutageEventTable_handler: unsupported mode.\n");
 		break;
     }
 

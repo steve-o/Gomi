@@ -74,14 +74,15 @@ namespace gomi
 	class cool_t : boost::noncopyable
 	{
 	public:
-		cool_t (const std::string& name, boost::circular_buffer<event_t>& events, boost::shared_mutex& events_lock)
+		cool_t (const std::string& name, boost::circular_buffer<event_t>& events, boost::shared_mutex& events_lock, unsigned& event_id)
 			: name_ (name),
 			  is_online_ (false),
 			  accumulated_failures_ (1),
 			  recording_start_time_ (boost::posix_time::second_clock::universal_time()),
 			  transition_time_ (recording_start_time_),
 			  events_ (events),
-			  events_lock_ (events_lock)
+			  events_lock_ (events_lock),
+			  event_id_ (event_id)
 		{
 		}
 		~cool_t();
@@ -89,8 +90,10 @@ namespace gomi
 		void OnRecovery();
 		void OnOutage();
 
+		bool IsOnline() const { return is_online_; }
 		const std::string& GetLoginName() const { return name_; }
 		boost::posix_time::time_duration GetAccumulatedOutageTime (boost::posix_time::ptime now) const;
+		boost::posix_time::ptime GetLastChangeTime() const { return transition_time_; }
 		uint32_t GetAccumulatedFailures() const { return accumulated_failures_; }
 		boost::posix_time::ptime GetRecordingStartTime() const { return recording_start_time_; }
 
@@ -108,6 +111,7 @@ namespace gomi
 /* terrible but convenient */
 		boost::circular_buffer<event_t>& events_;
 		boost::shared_mutex& events_lock_;
+		unsigned& event_id_;
 	};
 
 	inline
@@ -132,18 +136,18 @@ namespace gomi
 	public:
 /* implicit */
 		event_t()
-			: start_time_ (boost::posix_time::not_a_date_time), end_time_ (boost::posix_time::not_a_date_time), is_online_ (false)
+			: id_ (0), start_time_ (boost::posix_time::not_a_date_time), end_time_ (boost::posix_time::not_a_date_time), is_online_ (false)
 		{
 		}
 
-		explicit event_t (const std::string& name, boost::posix_time::ptime start_time, boost::posix_time::ptime end_time, bool is_online)
-			: name_ (name), start_time_ (start_time), end_time_ (end_time), is_online_ (is_online)
+		explicit event_t (unsigned id, const std::string& name, boost::posix_time::ptime start_time, boost::posix_time::ptime end_time, bool is_online)
+			: id_ (id), name_ (name), start_time_ (start_time), end_time_ (end_time), is_online_ (is_online)
 		{
 		}
 
 /* copy ctor */
 		event_t (const event_t& other)
-			: name_ (other.name_), start_time_ (other.start_time_), end_time_ (other.end_time_), is_online_ (other.is_online_)
+			: id_ (other.id_), name_ (other.name_), start_time_ (other.start_time_), end_time_ (other.end_time_), is_online_ (other.is_online_)
 		{
 		}
 
@@ -157,6 +161,7 @@ namespace gomi
 		event_t& operator= (const event_t& other)
 		{
 			if (this != &other) {
+				id_ = other.id_;
 				name_ = other.name_;
 				start_time_ = other.start_time_;
 				end_time_ = other.end_time_;
@@ -172,12 +177,14 @@ namespace gomi
 				/* free */
 
 				/* copy */
+				id_ = other.id_;
 				name_ = other.name_;
 				start_time_ = other.start_time_;
 				end_time_ = other.end_time_;
 				is_online_ = other.is_online_;
 
 				/* release */
+				other.id_ = 0;
 				other.name_.clear();
 				other.start_time_ = boost::posix_time::not_a_date_time;
 				other.end_time_ = boost::posix_time::not_a_date_time;
@@ -186,6 +193,7 @@ namespace gomi
 			return *this;
 		}
 
+		unsigned GetIndex() const { return id_; }
 		const std::string& GetLoginName() const { return name_; }
 		boost::posix_time::ptime GetStartTime() const { return start_time_; }
 		boost::posix_time::ptime GetEndTime() const { return end_time_; }
@@ -193,6 +201,7 @@ namespace gomi
 		bool IsOnline() const { return is_online_; }
 
 	protected:
+		unsigned id_;
 		std::string name_;
 		boost::posix_time::ptime start_time_, end_time_;
 		bool is_online_;
@@ -202,11 +211,12 @@ namespace gomi
 	std::ostream& operator<< (std::ostream& o, const event_t& event) {
 		using namespace boost::posix_time;
 		o << "{ "
-			  "\"Username\": \"" << event.GetLoginName() << "\""
+			  "\"Index\": \"" << event.GetIndex() << "\""
+			", \"State\": \"" << (event.IsOnline() ? "UP" : "DOWN") << "\""
+			", \"Duration\": \"" << to_simple_string (event.GetDuration()) << "\""
 			", \"StartTime\": \"" << to_simple_string (event.GetStartTime()) << "\""
 			", \"EndTime\": \"" << to_simple_string (event.GetEndTime()) << "\""
-			", \"Duration\": \"" << to_simple_string (event.GetDuration()) << "\""
-			", \"State\": \"" << (event.IsOnline() ? "UP" : "DOWN") << "\""
+			", \"Username\": \"" << event.GetLoginName() << "\""
 			" }";
 		return o;
 	}
@@ -238,6 +248,8 @@ namespace gomi
 		uint32_t GetServiceId() const {
 			return service_id_;
 		}
+
+		void WriteCoolTables (std::string* output);
 
 	private:
 		void OnConnectionEvent (const rfa::sessionLayer::ConnectionEvent& event);
@@ -296,6 +308,7 @@ namespace gomi
 /* COOL events */
 		std::shared_ptr<boost::circular_buffer<event_t>> events_;
 		boost::shared_mutex events_lock_;
+		unsigned event_id_;
 
 /* Entire request set */
 		boost::unordered_map<rfa::sessionLayer::RequestToken*const, std::weak_ptr<client_t>> requests_;
@@ -337,7 +350,7 @@ namespace gomi
 		uint32_t snap_stats_[PROVIDER_PC_MAX];
 
 #ifdef GOMIMIB_H
-		friend Netsnmp_Node_Handler gomiPluginPerformanceTable_handler;
+		friend Netsnmp_Node_Handler gomiPerformanceTable_handler;
 
 		friend Netsnmp_First_Data_Point gomiClientTable_get_first_data_point;
 		friend Netsnmp_Next_Data_Point gomiClientTable_get_next_data_point;
@@ -345,6 +358,12 @@ namespace gomi
 
 		friend Netsnmp_First_Data_Point gomiClientPerformanceTable_get_first_data_point;
 		friend Netsnmp_Next_Data_Point gomiClientPerformanceTable_get_next_data_point;
+
+		friend Netsnmp_First_Data_Point gomiOutageMeasurementTable_get_first_data_point;
+		friend Netsnmp_Next_Data_Point gomiOutageMeasurementTable_get_next_data_point;
+
+		friend Netsnmp_First_Data_Point gomiOutageEventTable_get_first_data_point;
+		friend Netsnmp_Next_Data_Point gomiOutageEventTable_get_next_data_point;
 #endif /* GOMIMIB_H */
 	};
 
