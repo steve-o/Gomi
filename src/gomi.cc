@@ -810,7 +810,7 @@ gomi::gomi_t::Init()
 			return false;
 
 /* RFA logging. */
-		log_.reset (new logging::LogEventProvider (config_, event_queue_));
+		log_.reset (new logging::rfa::LogEventProvider (config_, event_queue_));
 		if (!(bool)log_ || !log_->Register())
 			return false;
 

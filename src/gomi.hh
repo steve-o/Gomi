@@ -49,7 +49,10 @@ namespace chromium
 
 namespace logging
 {
+namespace rfa
+{
 	class LogEventProvider;
+}
 }
 
 namespace portware
@@ -202,7 +205,7 @@ namespace gomi
 		std::shared_ptr<rfa::common::EventQueue> event_queue_;
 
 /* RFA logging */
-		std::shared_ptr<logging::LogEventProvider> log_;
+		std::shared_ptr<logging::rfa::LogEventProvider> log_;
 
 /* RFA provider */
 		std::shared_ptr<provider_t> provider_;

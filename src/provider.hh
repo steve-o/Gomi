@@ -124,7 +124,7 @@ namespace gomi
 			  "\"Username\": \"" << cool.GetLoginName() << "\""
 			", \"AOT\": \"" << to_simple_string (cool.GetAccumulatedOutageTime (now)) << "\""
 			", \"NAF\": " << cool.GetAccumulatedFailures() <<
-			", \"Availability\": \"" << (100.0 * cool.GetAvailability (now)) << "%%\""
+			", \"Availability\": \"" << std::setprecision (3) << (100.0 * cool.GetAvailability (now)) << "%\""
 			", \"MTTR\": \"" << to_simple_string (MTTR) << "\""
 			", \"MTBF\": \"" << to_simple_string (MTBF) << "\""
 			" }";
