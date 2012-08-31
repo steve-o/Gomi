@@ -502,9 +502,13 @@ gomi::client_t::AcceptLogin (
 		if (rfa::rdm::USER_NAME == login_msg.getAttribInfo().getNameType() &&
 			provider_->cool_.end() != it)
 		{
-			cool_ = it->second;
-			cool_->OnRecovery();
-			DLOG(INFO) << prefix_ << "OnRecovery:" << *cool_.get();
+			if (it->second->IsOnline()) {
+				LOG(WARNING) << prefix_ << "Ignoring COOL registration for duplicate login of username \"" << name_ << "\".";
+			} else {
+				cool_ = it->second;
+				cool_->OnRecovery();
+				DLOG(INFO) << prefix_ << "OnRecovery:" << *cool_.get();
+			}
 		}		
 		is_logged_in_ = true;
 	}	
