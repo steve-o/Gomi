@@ -14,7 +14,7 @@ set(GOMI_VERSION_BUILD 26)
 set(NETSNMP_ROOT D:/net-snmp-5.7.1)
 set(NETSNMP_INCLUDE_DIRS
 	${NETSNMP_ROOT}/include/net-snmp
-	C:/usr/include
+	D:/usr/include
 )
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set(NETSNMP_BUILD_TYPE "debug")
@@ -36,14 +36,16 @@ set(VHAYU_INCLUDE_DIRS
 )
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set(VHAYU_BUILD_TYPE "debug")
-	set(VHAYU_XERCES_LIBRARY "xerces-c_3D.lib")
 else (CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set(VHAYU_BUILD_TYPE "release")
-	set(VHAYU_XERCES_LIBRARY "xerces-c_3.lib")
 endif (CMAKE_BUILD_TYPE STREQUAL "Debug")
 set(VHAYU_LIBRARY_DIRS
 	${VHAYU_ROOT}/Engine/TBSDK/Lib64/${VHAYU_BUILD_TYPE}
 	${VHAYU_ROOT}/Engine/ThirdParty/xerces-c-3.1.1-x86_64-windows-vc-10.0/lib
+)
+set(VHAYU_XERCES_LIBRARY
+	optimized xerces-c_3.lib
+	debug xerces-c_3D.lib
 )
 set(VHAYU_LIBRARIES
 	FlexRecord.lib
@@ -154,8 +156,8 @@ set(LIBRARY_OUTPUT_PATH  ${CMAKE_BINARY_DIR}/lib)
 add_definitions(
 	-DWIN32
 	-DWIN32_LEAN_AND_MEAN
-# Windows Server 2008 (not-R2)
-	-D_WIN32_WINNT=0x0600
+# Windows Server 2008 R2 and Windows 7
+	-D_WIN32_WINNT=0x0601
 # Net-SNMP Autoconf overrides
 	-DHAVE_STDINT_H
 # RFA version
@@ -164,13 +166,29 @@ add_definitions(
 	-DOFFICIAL_BUILD
 )
 
-# SEH Exceptions
-set(CMAKE_CXX_FLAGS "/EHa")
+# SEH Exceptions.
+string(REGEX REPLACE "/EHsc" "/EHa" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+
+# Parallel make
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
+
+# Optimization flags.
+# http://msdn.microsoft.com/en-us/magazine/cc301698.aspx
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /GL")
+set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")
+set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /LTCG")
+set(CMAKE_MODULE_LINKER_FLAGS_RELEASE "${CMAKE_MODULE_LINKER_FLAGS_RELEASE} /LTCG")
+
+# Disable buffer security check.
+# http://msdn.microsoft.com/en-us/library/8dbf701c(v=vs.80).aspx
+SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /GS-")
 
 #-----------------------------------------------------------------------------
 # Generated source files
 
 PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS src/provider.proto)
+
+set_source_files_properties(${PROTO_SRCS} PROPERTIES COMPILE_FLAGS "/W0")
 
 configure_file(
 	${CMAKE_SOURCE_DIR}/version_generator.py.in

@@ -508,7 +508,7 @@ gomi::gomi_t::TclHistogramDump (
 	if ((bool)recorder_)
 		recorder_->WriteGraph ("", &output);
 
-	Tcl_Obj* resultPtr = Tcl_NewStringObj (output.c_str(), output.size());
+	Tcl_Obj* resultPtr = Tcl_NewStringObj (output.c_str(), static_cast<int> (output.size()));
 	Tcl_SetObjResult (interp, resultPtr);
 
 	return TCL_OK;
@@ -527,7 +527,7 @@ gomi::gomi_t::TclCoolDump (
 	if ((bool)provider_)
 		provider_->WriteCoolTables (&output);
 
-	Tcl_Obj* resultPtr = Tcl_NewStringObj (output.c_str(), output.size());
+	Tcl_Obj* resultPtr = Tcl_NewStringObj (output.c_str(), static_cast<int> (output.size()));
 	Tcl_SetObjResult (interp, resultPtr);
 
 	return TCL_OK;

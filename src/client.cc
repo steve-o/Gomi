@@ -16,7 +16,6 @@
 #include "error.hh"
 #include "rfaostream.hh"
 #include "provider.hh"
-#include "provider.pb.h"
 
 using rfa::common::RFA_String;
 

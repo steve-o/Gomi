@@ -31,7 +31,7 @@
 #include "error.hh"
 #include "rfa_logging.hh"
 #include "rfaostream.hh"
-#include "provider.pb.h"
+#include "provider.hh"
 #include "version.hh"
 #include "portware.hh"
 

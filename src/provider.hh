@@ -37,7 +37,11 @@
 #include "rfa.hh"
 #include "config.hh"
 #include "deleter.hh"
+
+#pragma warning( push )
+#pragma warning( disable : 4244 4267 )
 #include "provider.pb.h"
+#pragma warning( pop )
 
 namespace gomi
 {
@@ -118,8 +122,8 @@ namespace gomi
 	std::ostream& operator<< (std::ostream& o, const cool_t& cool) {
 		using namespace boost::posix_time;
 		const auto now (second_clock::universal_time());
-		const time_duration MTTR = seconds (cool.GetMTTR (now));
-		const time_duration MTBF = seconds (cool.GetMTBF (now));
+		const time_duration MTTR = seconds (static_cast<long> (cool.GetMTTR (now)));
+		const time_duration MTBF = seconds (static_cast<long> (cool.GetMTBF (now)));
 		o << "{ "
 			  "\"Username\": \"" << cool.GetLoginName() << "\""
 			", \"AOT\": \"" << to_simple_string (cool.GetAccumulatedOutageTime (now)) << "\""

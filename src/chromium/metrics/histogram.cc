@@ -119,7 +119,7 @@ Histogram* Histogram::FactoryTimeGet(const std::string& name,
                                      boost::chrono::milliseconds maximum,
                                      size_t bucket_count,
                                      Flags flags) {
-  return FactoryGet(name, minimum.count(), maximum.count(),
+  return FactoryGet(name, static_cast<Sample> (minimum.count()), static_cast<Sample> (maximum.count()),
                     bucket_count, flags);
 }
 
@@ -685,7 +685,7 @@ Histogram* LinearHistogram::FactoryTimeGet(const std::string& name,
                                            boost::chrono::milliseconds maximum,
                                            size_t bucket_count,
                                            Flags flags) {
-  return FactoryGet(name, minimum.count(), maximum.count(),
+  return FactoryGet(name, static_cast<Sample> (minimum.count()), static_cast<Sample> (maximum.count()),
                     bucket_count, flags);
 }
 
@@ -711,8 +711,8 @@ LinearHistogram::LinearHistogram(const std::string& name,
                                  boost::chrono::milliseconds minimum,
                                  boost::chrono::milliseconds maximum,
                                  size_t bucket_count)
-    : Histogram(name, minimum.count() >= 1 ? minimum.count() : 1,
-                maximum.count(), bucket_count) {
+    : Histogram(name, minimum.count() >= 1 ? static_cast<Sample> (minimum.count()) : 1,
+                static_cast<Sample> (maximum.count()), bucket_count) {
 }
 
 void LinearHistogram::InitializeBucketRange() {
