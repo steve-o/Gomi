@@ -34,6 +34,7 @@
 /* ZeroMQ messaging middleware. */
 #include <zmq.h>
 
+#include "chromium/debug/leak_tracker.hh"
 #include "rfa.hh"
 #include "config.hh"
 #include "deleter.hh"
@@ -369,6 +370,8 @@ namespace gomi
 		friend Netsnmp_First_Data_Point gomiOutageEventTable_get_first_data_point;
 		friend Netsnmp_Next_Data_Point gomiOutageEventTable_get_next_data_point;
 #endif /* GOMIMIB_H */
+
+		chromium::debug::LeakTracker<provider_t> leak_tracker_;
 	};
 
 } /* namespace gomi */

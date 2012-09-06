@@ -13,6 +13,7 @@
 /* RFA 7.2 */
 #include <rfa/rfa.hh>
 
+#include "chromium/debug/leak_tracker.hh"
 #include "config.hh"
 #include "deleter.hh"
 
@@ -30,11 +31,12 @@ namespace gomi
 		bool VerifyVersion();
 
 	private:
-
 		const config_t& config_;		
 
 /* Live config database */
 		std::unique_ptr<rfa::config::ConfigDatabase, internal::release_deleter> rfa_config_;
+
+		chromium::debug::LeakTracker<rfa_t> leak_tracker_;
 	};
 
 } /* namespace gomi */

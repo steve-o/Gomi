@@ -172,6 +172,7 @@ add_definitions(
         -DRFA_LIBRARY_VERSION="7.2.1."
 # production release
 	-DOFFICIAL_BUILD
+#	-DENABLE_LEAK_TRACKER
 )
 
 # SEH Exceptions.

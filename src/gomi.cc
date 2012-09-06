@@ -985,8 +985,16 @@ gomi::gomi_t::Clear()
 	log_.reset();
 	CHECK (event_queue_.use_count() <= 1);
 	event_queue_.reset();
+
+/* Final tests before releasing RFA context */
+	chromium::debug::LeakTracker<provider_t>::CheckForLeaks();
+	chromium::debug::LeakTracker<logging::rfa::LogEventProvider>::CheckForLeaks();
+
+/* No more RFA handles so close up context */
 	CHECK (rfa_.use_count() <= 1);
 	rfa_.reset();
+
+	chromium::debug::LeakTracker<rfa_t>::CheckForLeaks();
 }
 
 /* Plugin exit point.

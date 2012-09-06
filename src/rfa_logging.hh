@@ -11,6 +11,7 @@
 /* RFA 7.2 */
 #include <rfa/rfa.hh>
 
+#include "chromium/debug/leak_tracker.hh"
 #include "config.hh"
 #include "deleter.hh"
 
@@ -34,7 +35,6 @@ namespace rfa
 		void processEvent (const ::rfa::common::Event& event_);
 
 	private:
-
 		void processLoggerNotifyEvent (const ::rfa::logger::LoggerNotifyEvent& event_);
 
 		const gomi::config_t& config_;
@@ -50,6 +50,8 @@ namespace rfa
 
 /* RFA log event consumer. */
 		::rfa::common::Handle* handle_;
+
+		chromium::debug::LeakTracker<LogEventProvider> leak_tracker_;
 	};
 
 } /* namespace rfa */
