@@ -31,16 +31,16 @@ set(NETSNMP_LIBRARIES
 )
 
 # TREP-VA 7.0 SDK
-set(VHAYU_ROOT D:/Vhayu-7.0.5)
-set(VHAYU_INCLUDE_DIRS
-	${VHAYU_ROOT}/Engine/TBSDK/Include
-	${VHAYU_ROOT}/Engine/ThirdParty/xerces-c-3.1.1-x86_64-windows-vc-10.0/include
-)
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set(VHAYU_BUILD_TYPE "debug")
 else (CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set(VHAYU_BUILD_TYPE "release")
 endif (CMAKE_BUILD_TYPE STREQUAL "Debug")
+set(VHAYU_ROOT D:/Vhayu-7.0.5)
+set(VHAYU_INCLUDE_DIRS
+	${VHAYU_ROOT}/Engine/TBSDK/Include
+	${VHAYU_ROOT}/Engine/ThirdParty/xerces-c-3.1.1-x86_64-windows-vc-10.0/include
+)
 set(VHAYU_LIBRARY_DIRS
 	${VHAYU_ROOT}/Engine/TBSDK/Lib64/${VHAYU_BUILD_TYPE}
 	${VHAYU_ROOT}/Engine/ThirdParty/xerces-c-3.1.1-x86_64-windows-vc-10.0/lib
@@ -58,16 +58,16 @@ set(VHAYU_LIBRARIES
 )
 
 # Thomson Reuters Robust Foundation API
-set(RFA_ROOT D:/rfa7.2.1.L1.win-shared.rrg)
-set(RFA_INCLUDE_DIRS
-	${RFA_ROOT}/Include
-	${RFA_ROOT}/Include/rwf
-)
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set(RFA_BUILD_TYPE "Debug_MDd")
 else (CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set(RFA_BUILD_TYPE "Release_MD")
 endif (CMAKE_BUILD_TYPE STREQUAL "Debug")
+set(RFA_ROOT D:/rfa7.2.1.L1.win-shared.rrg)
+set(RFA_INCLUDE_DIRS
+	${RFA_ROOT}/Include
+	${RFA_ROOT}/Include/rwf
+)
 set(RFA_LIBRARY_DIRS ${RFA_ROOT}/Libs/WIN_64_VS100/${RFA_BUILD_TYPE})
 set(RFA_LIBRARY_DIR ${RFA_LIBRARY_DIRS})
 set(RFA_LIBRARIES
@@ -178,8 +178,8 @@ add_definitions(
 # SEH Exceptions.
 string(REGEX REPLACE "/EHsc" "/EHa" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 
-# Parallel make
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
+# Parallel make.
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
 
 # Optimization flags.
 # http://msdn.microsoft.com/en-us/magazine/cc301698.aspx
@@ -190,7 +190,7 @@ set(CMAKE_MODULE_LINKER_FLAGS_RELEASE "${CMAKE_MODULE_LINKER_FLAGS_RELEASE} /LTC
 
 # Disable buffer security check.
 # http://msdn.microsoft.com/en-us/library/8dbf701c(v=vs.80).aspx
-SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /GS-")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /GS-")
 
 #-----------------------------------------------------------------------------
 # Generated source files
