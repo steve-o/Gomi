@@ -8,20 +8,22 @@ project (Gomi)
 
 set(GOMI_VERSION_MAJOR 2)
 set(GOMI_VERSION_MINOR 4)
-set(GOMI_VERSION_BUILD 26)
+set(GOMI_VERSION_BUILD 27)
 
 # Net-SNMP SDK installed, tested 5.7.1.
-set(NETSNMP_ROOT D:/net-snmp-5.7.1)
-set(NETSNMP_INCLUDE_DIRS
-	${NETSNMP_ROOT}/include/net-snmp
-	D:/usr/include
-)
+if (MSVC11)
+	set(NETSNMP_BUILD_COMPILER "vc110")
+elseif (MSVC10)
+	set(NETSNMP_BUILD_COMPILER "vc100")
+endif ()
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set(NETSNMP_BUILD_TYPE "debug")
 else (CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set(NETSNMP_BUILD_TYPE "release")
 endif (CMAKE_BUILD_TYPE STREQUAL "Debug")
-set(NETSNMP_LIBRARY_DIRS ${NETSNMP_ROOT}/win32/lib/${NETSNMP_BUILD_TYPE})
+set(NETSNMP_ROOT D:/net-snmp-5.7.1/stage/${NETSNMP_BUILD_COMPILER}/x64/${NETSNMP_BUILD_TYPE})
+set(NETSNMP_INCLUDE_DIRS ${NETSNMP_ROOT}/include)
+set(NETSNMP_LIBRARY_DIRS ${NETSNMP_ROOT}/lib)
 set(NETSNMP_LIBRARIES
 	netsnmp.lib
 	netsnmpagent.lib
@@ -106,7 +108,12 @@ else (CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif (CMAKE_BUILD_TYPE STREQUAL "Debug")
 
 # Google Protocol BUffers
-set(PROTOBUF_SRC_ROOT_FOLDER "D:/protobuf-2.4.1")
+if (MSVC11)
+	set(PROTOBUF_BUILD_COMPILER "vc110")
+elseif (MSVC10)
+	set(PROTOBUF_BUILD_COMPILER "vc100")
+endif ()
+set(PROTOBUF_SRC_ROOT_FOLDER "D:/protobuf-2.4.1-${PROTOBUF_BUILD_COMPILER}-x64")
 find_package (Protobuf REQUIRED)
 
 # Boost headers plus built libraries
@@ -160,6 +167,7 @@ add_definitions(
 	-D_WIN32_WINNT=0x0601
 # Net-SNMP Autoconf overrides
 	-DHAVE_STDINT_H
+	-DHAVE_SOCKLEN_T
 # RFA version
         -DRFA_LIBRARY_VERSION="7.2.1."
 # production release
@@ -288,7 +296,7 @@ target_link_libraries(Gomi
 	${RFA_LIBRARIES}
 	${Boost_LIBRARIES}
 	${ZEROMQ_LIBRARIES}
-	${PROTOBUF_LIBRARIES}
+	${PROTOBUF_LITE_LIBRARIES}
 	ws2_32.lib
 	dbghelp.lib
 )

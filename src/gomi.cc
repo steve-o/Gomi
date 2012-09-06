@@ -237,7 +237,9 @@ public:
 				continue;
 			}
 			VLOG(1) << prefix_ << "Received request \"" << request_.refresh().item_name() << "\"";
+#ifndef GOOGLE_PROTOBUF_MESSAGE_LITE_H__
 			DVLOG(1) << prefix_ << request_.DebugString();
+#endif
 
 			try {
 /* forward to main application */
@@ -1126,7 +1128,9 @@ gomi::event_pump_t::Run (void)
 				continue;
 			}
 
+#ifndef GOOGLE_PROTOBUF_MESSAGE_LITE_H__
 			DVLOG(2) << response.DebugString();
+#endif
 /* token */
 			token = reinterpret_cast<rfa::sessionLayer::RequestToken*> (response.token());
 			try {
