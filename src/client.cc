@@ -241,8 +241,8 @@ gomi::client_t::OnLoginRequest (
 			", " << login_msg <<
 			", \"RequestToken\": " << (uintptr_t)login_token <<
 			" }";
-	} catch (std::exception& e) {
-		LOG(ERROR) << "Rfa::Exception: { "
+	} catch (const std::exception& e) {
+		LOG(ERROR) << prefix_ << "Rfa::Exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
 	}

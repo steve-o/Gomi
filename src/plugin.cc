@@ -29,32 +29,6 @@ static const char* kPluginType = "GomiPlugin";
 
 namespace { /* anonymous */
 
-/* Vhayu log system wrapper */
-static
-bool
-log_handler (
-	int			severity,
-	const char*		file,
-	int			line,
-	size_t			message_start,
-	const std::string&	str
-	)
-{
-	int priority;
-	switch (severity) {
-	default:
-	case logging::LOG_INFO:		priority = eMsgInfo; break;
-	case logging::LOG_WARNING:	priority = eMsgLow; break;
-	case logging::LOG_ERROR:	priority = eMsgMedium; break;
-	case logging::LOG_FATAL:	priority = eMsgFatal; break;
-	}
-/* Yay, broken APIs */
-	std::string str1 (boost::algorithm::trim_right_copy (str));
-	MsgLog (priority, 0, const_cast<char*> ("%s"), str1.c_str());
-/* allow additional log targets */
-	return false;
-}
-
 class env_t
 {
 public:
@@ -112,6 +86,24 @@ protected:
 		else
 			log_mode = kDefaultLoggingMode;
 		return log_mode;
+	}
+
+/* Vhayu log system wrapper */
+	static bool log_handler (int severity, const char* file, int line, size_t message_start, const std::string& str)
+	{
+		int priority;
+		switch (severity) {
+		default:
+		case logging::LOG_INFO:		priority = eMsgInfo; break;
+		case logging::LOG_WARNING:	priority = eMsgLow; break;
+		case logging::LOG_ERROR:	priority = eMsgMedium; break;
+		case logging::LOG_FATAL:	priority = eMsgFatal; break;
+		}
+	/* Yay, broken APIs */
+		std::string str1 (boost::algorithm::trim_right_copy (str));
+		MsgLog (priority, 0, const_cast<char*> ("%s"), str1.c_str());
+	/* allow additional log targets */
+		return false;
 	}
 };
 

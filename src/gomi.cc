@@ -576,7 +576,7 @@ protected:
 			validation_status = respmsg_.validateMsg (&warningText);
 			if (rfa::message::MsgValidationWarning == validation_status)
 				LOG(ERROR) << prefix_ << "validateMsg: { \"warningText\": \"" << warningText << "\" }";
-		} catch (rfa::common::InvalidUsageException& e) {
+		} catch (const rfa::common::InvalidUsageException& e) {
 			LOG(ERROR) << prefix_ << "InvalidUsageException: { " <<
 					   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 					", " << respmsg_ <<
