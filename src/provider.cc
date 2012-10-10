@@ -498,12 +498,12 @@ gomi::provider_t::OnOMMActiveClientSessionEvent (
 		else
 			AcceptClientSession (handle, address.c_str());
 /* ignore any error */
-	} catch (rfa::common::InvalidUsageException& e) {
+	} catch (const rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[PROVIDER_PC_OMM_ACTIVE_CLIENT_SESSION_EXCEPTION]++;
 		LOG(ERROR) << "OMMActiveClientSession::InvalidUsageException: { "
 				"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 				" }";
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "Rfa::Exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";

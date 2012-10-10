@@ -163,7 +163,7 @@ public:
 			CHECK((bool)response_sock_);
 			rc = zmq_connect (response_sock_.get(), "inproc://gomi/rfa/response");
 			CHECK(0 == rc);
-		} catch (std::exception& e) {
+		} catch (const std::exception& e) {
 			LOG(ERROR) << prefix_ << "ZeroMQ::Exception: { "
 				"\"What\": \"" << e.what() << "\""
 				" }";
@@ -181,14 +181,14 @@ public:
 			CHECK ((bool)single_write_it_);
 			single_write_it_->initialize (*fields_.get(), static_cast<int> (config_.maximum_data_size));
 			CHECK (single_write_it_->isInitialized());
-		} catch (rfa::common::InvalidUsageException& e) {
+		} catch (const rfa::common::InvalidUsageException& e) {
 			LOG(ERROR) << prefix_ << "InvalidUsageException: { "
 				  "\"Severity\": \"" << severity_string (e.getSeverity()) << "\""
 				", \"Classification\": \"" << classification_string (e.getClassification()) << "\""
 				", \"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 				" }";
 			return false;
-		} catch (std::exception& e) {
+		} catch (const std::exception& e) {
 			LOG(ERROR) << prefix_ << "Rfa::Exception: { "
 				"\"What\": \"" << e.what() << "\""
 				" }";
@@ -204,7 +204,7 @@ public:
 			if (!manager_->GetView ("Trade", view_element_->view)) {
 				LOG(ERROR) << prefix_ << "FlexRecDefinitionManager::GetView failed";
 			}
-		} catch (std::exception& e) {
+		} catch (const std::exception& e) {
 			LOG(ERROR) << prefix_ << "FlexRecord::Exception: { "
 				"\"What\": \"" << e.what() << "\""
 				" }";
@@ -250,7 +250,7 @@ public:
 					   request_.msg_type(),
 					   request_.refresh().rwf_major_version(),
 					   request_.refresh().rwf_minor_version());
-			} catch (std::exception& e) {
+			} catch (const std::exception& e) {
 				LOG(ERROR) << prefix_ << "OnRequest::Exception: { "
 					"\"What\": \"" << e.what() << "\""
 					" }";
@@ -349,11 +349,11 @@ protected:
 			VLOG(2) << prefix_ << "Processing bin: " << bin_decl;
 			bin.Calculate (start_date, work_area_.get(), view_element_.get());
 			SendSnapshot (bin, service_id, stream_name, rwf_major_version, rwf_minor_version, token);
-		} catch (rfa::common::InvalidUsageException& e) {
+		} catch (const rfa::common::InvalidUsageException& e) {
 			LOG(ERROR) << prefix_ << "InvalidUsageException: { " <<
 					"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 					" }";
-		} catch (std::exception& e) {
+		} catch (const std::exception& e) {
 			LOG(ERROR) << prefix_ << "Calculate::Exception: { "
 					"\"What\": \"" << e.what() << "\""
 					" }";
@@ -751,7 +751,7 @@ gomi::gomi_t::Init()
 		if (!manager_->GetView ("Trade", view_element_->view)) {
 			LOG(ERROR) << "FlexRecDefinitionManager::GetView failed";
 		}
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "FlexRecord::Exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
@@ -1156,11 +1156,11 @@ gomi::event_pump_t::Run (void)
 				HISTOGRAM_TIMES("Provider.Submit", high_resolution_clock::now() - checkpoint);
 				DVLOG(1) << "Response forwarded to RFA.";
 				respmsg.clear();
-			} catch (rfa::common::InvalidUsageException& e) {
+			} catch (const rfa::common::InvalidUsageException& e) {
 				LOG(ERROR) << "EncodedBuffer::InvalidUsageException: { " <<
 						"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 						" }";
-			} catch (std::exception& e) {
+			} catch (const std::exception& e) {
 				LOG(ERROR) << "Rfa::Exception: { "
 					"\"What\": \"" << e.what() << "\""
 					" }";

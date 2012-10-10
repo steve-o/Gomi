@@ -88,7 +88,7 @@ gomi::client_t::Clear (void)
 		LOG(ERROR) << prefix_ << "OMMInactiveClientSession::InvalidUsageException: { "
 				"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 				" }";
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "Rfa::Exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
@@ -293,7 +293,7 @@ gomi::client_t::OnLoginRequest (
 			", " << login_msg <<
 			", \"RequestToken\": " << (uintptr_t)login_token <<
 			" }";
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "Rfa::Exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
@@ -367,7 +367,7 @@ gomi::client_t::RejectLogin (
 			   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			", " << response <<
 			" }";
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "Rfa::Exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
@@ -483,7 +483,7 @@ gomi::client_t::AcceptLogin (
 			   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			", " << response <<
 			" }";
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "Rfa::Exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
@@ -534,7 +534,7 @@ gomi::client_t::OnDirectoryRequest (
 		cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_REQUEST_VALIDATED]++;
 		if (rfa::message::MsgValidationWarning == validation_status)
 			LOG(WARNING) << prefix_ << "MMT_DIRECTORY::validateMsg: { \"warningText\": \"" << warningText << "\" }";
-	} catch (rfa::common::InvalidUsageException& e) {
+	} catch (const rfa::common::InvalidUsageException& e) {
 		cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_REQUEST_MALFORMED]++;
 		LOG(WARNING) << prefix_ <<
 			"MMT_DIRECTORY::InvalidUsageException: { " <<
@@ -542,7 +542,7 @@ gomi::client_t::OnDirectoryRequest (
 			", " << request_msg <<
 			", \"RequestToken\": " << (intptr_t)&request_token <<
 			" }";
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "Rfa::Exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
@@ -606,7 +606,7 @@ gomi::client_t::OnDirectoryRequest (
 		LOG(ERROR) << prefix_ << "MMT_DIRECTORY::InvalidUsageException: { "
 				"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 				" }";
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "Rfa::Exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
@@ -718,7 +718,7 @@ gomi::client_t::OnItemRequest (
 				", " << request_msg <<
 				", \"RequestToken\": " << (uintptr_t)request_token <<
 				" }";
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "Rfa::Exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
@@ -819,7 +819,7 @@ gomi::client_t::OnOMMInactiveClientSessionEvent (
 		LOG(ERROR) << prefix_ << "OMMInactiveClientSession::InvalidUsageException: { "
 				"\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 				" }";
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "Rfa::Exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
@@ -863,7 +863,7 @@ gomi::client_t::SendDirectoryResponse (
 			   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			", " << response <<
 			" }";
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "Rfa::Exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
@@ -945,7 +945,7 @@ gomi::client_t::SendClose (
 			   "\"StatusText\": \"" << e.getStatus().getStatusText() << "\""
 			", " << response <<
 			" }";
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "Rfa::Exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";

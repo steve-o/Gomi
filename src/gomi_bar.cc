@@ -75,7 +75,7 @@ gomi::bar_t::Calculate (
 				<< ", \"text\": \"" << error_text << "\" }";
 			return false;
 		}
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 /* typically out-of-memory exceptions due to insufficient virtual memory */
 		LOG(ERROR) << "FlexRecReader::Open raised exception " << e.what();
 		return false;
@@ -124,7 +124,7 @@ gomi::bar_t::Calculate (
 							this /* closure */
 								);
 		is_null_ = false;
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		LOG(ERROR) << "FlexRecPrimitives::GetFlexRecords raised exception " << e.what();
 		return false;
 	}
@@ -141,11 +141,11 @@ gomi::bar_t::processFlexRecord (
 	)
 {
 	CHECK(nullptr != info->callersData);
-	auto& bar = *static_cast<bar_t*> (info->callersData);
+	auto& bar = *reinterpret_cast<bar_t*> (info->callersData);
 
 /* extract from view */
-	const double   last_price  = *static_cast<double*>   (info->theView[kFRLastPrice].data);
-	const uint64_t tick_volume = *static_cast<uint64_t*> (info->theView[kFRTickVolume].data);
+	const double   last_price  = *reinterpret_cast<double*>   (info->theView[kFRLastPrice].data);
+	const uint64_t tick_volume = *reinterpret_cast<uint64_t*> (info->theView[kFRTickVolume].data);
 
 /* add to accumulators */
 	bar.last_price_  (last_price);
