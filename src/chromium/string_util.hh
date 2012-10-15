@@ -104,6 +104,14 @@ inline Char HexDigitToInt(Char c) {
   return 0;
 }
 
+// Starting at |start_offset| (usually 0), replace the first instance of
+// |find_this| with |replace_with|.
+void ReplaceFirstSubstringAfterOffset(
+    std::string* str,
+    std::string::size_type start_offset,
+    const std::string& find_this,
+    const std::string& replace_with);
+
 // Hack to convert any char-like type to its unsigned counterpart.
 // For example, it will convert char, signed char and unsigned char to unsigned
 // char.

@@ -238,6 +238,8 @@ set(cxx-sources
 	src/tcl.cc
 	src/gomi.cc
 	src/gomiMIB.cc
+	src/chrome/common/json_schema_constants.cc
+	src/chrome/common/json_schema_validator.cc
 	src/chromium/chromium_switches.cc
 	src/chromium/command_line.cc
 	src/chromium/debug/stack_trace.cc

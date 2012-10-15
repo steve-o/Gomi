@@ -4,6 +4,8 @@
 
 #include "string_util.hh"
 
+#include "logging.hh"
+
 const char kWhitespaceASCII[] = {
   0x09,    // <control-0009> to <control-000D>
   0x0A,
@@ -64,6 +66,34 @@ TrimPositions TrimWhitespace(const std::string& input,
                              TrimPositions positions,
                              std::string* output) {
   return TrimWhitespaceASCII(input, positions, output);
+}
+
+template<class StringType>
+void DoReplaceSubstringsAfterOffset(StringType* str,
+                                    typename StringType::size_type start_offset,
+                                    const StringType& find_this,
+                                    const StringType& replace_with,
+                                    bool replace_all) {
+  if ((start_offset == StringType::npos) || (start_offset >= str->length()))
+    return;
+
+  DCHECK(!find_this.empty());
+  for (typename StringType::size_type offs(str->find(find_this, start_offset));
+      offs != StringType::npos; offs = str->find(find_this, offs)) {
+    str->replace(offs, find_this.length(), replace_with);
+    offs += replace_with.length();
+
+    if (!replace_all)
+      break;
+  }
+}
+
+void ReplaceFirstSubstringAfterOffset(std::string* str,
+                                      std::string::size_type start_offset,
+                                      const std::string& find_this,
+                                      const std::string& replace_with) {
+  DoReplaceSubstringsAfterOffset(str, start_offset, find_this, replace_with,
+                                 false);  // replace first instance
 }
 
 // The following code is compatible with the OpenBSD lcpy interface.  See:
