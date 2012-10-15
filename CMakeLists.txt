@@ -244,6 +244,9 @@ set(cxx-sources
 	src/chromium/debug/stack_trace_win.cc
 	src/chromium/file_util.cc
 	src/chromium/file_util_win.cc
+	src/chromium/json/json_reader.cc
+	src/chromium/json/json_writer.cc
+	src/chromium/json/string_escape.cc
 	src/chromium/memory/singleton.cc
 	src/chromium/metrics/histogram.cc
 	src/chromium/metrics/stats_counters.cc
@@ -251,12 +254,14 @@ set(cxx-sources
 	src/chromium/logging.cc
 	src/chromium/logging_win.cc
 	src/chromium/shared_memory_win.cc
+	src/chromium/string_number_conversions.cc
 	src/chromium/string_piece.cc
 	src/chromium/string_split.cc
 	src/chromium/string_util.cc
 	src/chromium/stringprintf.cc
 	src/chromium/synchronization/lock.cc
 	src/chromium/synchronization/lock_impl_win.cc
+	src/chromium/values.cc
 	src/chromium/vlog.cc
 	src/chromium/win/event_trace_provider.cc
 	src/googleurl/url_parse.cc

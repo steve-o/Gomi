@@ -93,5 +93,3 @@ size_t lcpyT(CHAR* dst, const CHAR* src, size_t dst_size) {
 size_t chromium::strlcpy(char* dst, const char* src, size_t dst_size) {
   return lcpyT<char>(dst, src, dst_size);
 }
-
-/* eof */
