@@ -1,0 +1,1099 @@
+----------------------------------------------------------------
+--
+-- Bin equity analytics (Gomi) MIB
+--
+----------------------------------------------------------------
+
+GOMI-MIB DEFINITIONS ::= BEGIN
+
+-- IMPORTS: Include definitions from other mibs here, which is always
+-- the first item in a MIB file.
+IMPORTS
+        enterprises, OBJECT-TYPE, Counter32, MODULE-IDENTITY
+                FROM SNMPv2-SMI;
+
+--
+-- A brief description and update information about this mib.
+--
+gomiMIB MODULE-IDENTITY
+	LAST-UPDATED "201208310000Z"
+	ORGANIZATION
+		"Thomson Reuters"
+	CONTACT-INFO
+		"Steven McCoy
+		steven.mccoy@thomsonreuters.com
+		+1 646-223-8624
+		Thomson Reuters
+		3 Times Square
+		New York, NY 10036
+		USA"
+	DESCRIPTION
+		"The MIB module for managing Gomi bin analytics."
+	REVISION "201208310000Z"
+	DESCRIPTION
+		"Version 2.1: Strip unique instance, show indexes and refactor COOL OIDs."
+	REVISION "201208290000Z"
+	DESCRIPTION
+		"Version 2.0: Add persistent client outage measurement metrics."
+	REVISION "201208270000Z"
+	DESCRIPTION
+		"Version 1.0: Initial MIB."
+	::= { enterprises 67 }
+	
+
+-- Define typical mib nodes, like where the objects are going to lie.
+-- we'll prefix everything in this mib with gomi
+gomi OBJECT IDENTIFIER ::= { gomiMIB 3 }
+gomiPlugin OBJECT IDENTIFIER ::= { gomi 2 }
+
+gomiPluginNumberOfEntries OBJECT-TYPE
+	SYNTAX     Unsigned32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of Gomi plugin instances."
+	::= { gomiPlugin 1 }
+
+PluginId ::= TEXTUAL-CONVENTION
+	DISPLAY-HINT "255a"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	SYNTAX     OCTET STRING (SIZE (1..255))
+
+-- Plugin Management Table
+
+gomiPluginTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF gomiPluginEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding per plugin instance information."
+	::= { gomiPlugin 2 }
+
+gomiPluginEntry OBJECT-TYPE
+	SYNTAX     gomiPluginEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per plugin instance information."
+	INDEX    { gomiPluginId }
+	::= { gomiPluginTable 1 }
+
+gomiPluginEntry ::= SEQUENCE {
+	gomiPluginId
+		PluginId,
+	gomiPluginWindowsRegistryKey
+		OCTET STRING,
+	gomiPluginServiceName
+		OCTET STRING,
+	gomiPluginMonitorName 
+		OCTET STRING,
+	gomiPluginEventQueueName 
+		OCTET STRING,
+	gomiPluginVendorName 
+		OCTET STRING,
+	gomiPluginMaximumDataSize
+		Unsigned32,
+	gomiPluginSessionCapacity
+		Unsigned32,
+	gomiPluginWorkerCount
+		Unsigned32,
+	gomiPluginRicSuffix 
+		OCTET STRING,
+	gomiPluginDefaultTimezone
+		OCTET STRING,
+	gomiPluginTimezoneDatabase
+		OCTET STRING,
+	gomiPluginDefaultDayCount
+		Unsigned32
+	}
+
+gomiPluginId OBJECT-TYPE
+	SYNTAX     PluginId
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { gomiPluginEntry 1 }
+
+gomiPluginWindowsRegistryKey OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Windows registry override key."
+	::= { gomiPluginEntry 2 }
+
+gomiPluginServiceName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"TREP-RT service name."
+	::= { gomiPluginEntry 3 }
+
+gomiPluginMonitorName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA application logger monitor name."
+	::= { gomiPluginEntry 4 }
+
+gomiPluginEventQueueName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA event queue name."
+	::= { gomiPluginEntry 5 }
+
+gomiPluginVendorName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA vendor name."
+	::= { gomiPluginEntry 6 }
+
+gomiPluginMaximumDataSize OBJECT-TYPE
+	SYNTAX     Unsigned32
+	UNITS      "bytes"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA single write iterator pre-allocate size."
+	::= { gomiPluginEntry 7 }
+
+gomiPluginSessionCapacity OBJECT-TYPE
+	SYNTAX     Unsigned32
+	UNITS      "sessions"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Maximum number of concurrent sessions."
+	::= { gomiPluginEntry 8 }
+
+gomiPluginWorkerCount OBJECT-TYPE
+	SYNTAX     Unsigned32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Count of concurrent workers."
+	::= { gomiPluginEntry 9 }
+
+gomiPluginRicSuffix OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Fixed suffix for published RICs."
+	::= { gomiPluginEntry 10 }
+
+gomiPluginDefaultTimezone OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Default time zone for unspecified requests."
+	::= { gomiPluginEntry 11 }
+
+gomiPluginTimezoneDatabase OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"File path for Boost::DateTime time zone database."
+	::= { gomiPluginEntry 12 }
+
+gomiPluginDefaultDayCount OBJECT-TYPE
+	SYNTAX     Unsigned32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Default bin length in days."
+	::= { gomiPluginEntry 13 }
+
+-- Plugin Performance Management Table
+
+gomiPerformanceTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF gomiPerformanceEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding per plugin instance performance information."
+	::= { gomiPlugin 4 }
+
+gomiPerformanceEntry OBJECT-TYPE
+	SYNTAX     gomiPerformanceEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per plugin instance performance information."
+	INDEX    { gomiPerformancePluginId }
+	::= { gomiPerformanceTable 1 }
+
+gomiPerformanceEntry ::= SEQUENCE {
+	gomiPerformancePluginId
+		PluginId,
+	gomiTclQueryReceived
+		Counter32,
+	gomiTimerQueryReceived
+		Counter32,
+	gomiLastActivity
+		Counter32,
+	gomiTclSvcTimeMin
+		Counter32,
+	gomiTclSvcTimeMean
+		Counter32,
+	gomiTclSvcTimeMax
+		Counter32,
+	gomiTimerSvcTimeMin
+		Counter32,
+	gomiTimerSvcTimeMean
+		Counter32,
+	gomiTimerSvcTimeMax,
+		Counter32,
+	gomiMsgsSent
+		Counter32,
+	gomiLastMsgSent
+		Counter32
+	}
+
+gomiPerformancePluginId OBJECT-TYPE
+	SYNTAX     PluginId
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { gomiPerformanceEntry 1 }
+
+gomiTclQueryReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of Tcl queries received."
+	::= { gomiPerformanceEntry 2 }
+
+gomiTimerQueryReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of timer based queries received."
+	::= { gomiPerformanceEntry 3 }
+
+gomiLastActivity OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Last time activity was observed.  In seconds since the epoch, January 1, 1970."
+	::= { gomiPerformanceEntry 4 }
+
+gomiTclSvcTimeMin OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "milliseconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"The minimum time it took to resolve a Tcl query."
+	::= { gomiPerformanceEntry 5 }
+
+gomiTclSvcTimeMean OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "milliseconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"The mean time it took to resolve a Tcl query."
+	::= { gomiPerformanceEntry 6 }
+
+gomiTclSvcTimeMax OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "milliseconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"The maximum time it took to resolve a Tcl query."
+	::= { gomiPerformanceEntry 7 }
+
+gomiTimerSvcTimeMin OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "milliseconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"The minimum time it took to resolve a timer query."
+	::= { gomiPerformanceEntry 8 }
+
+gomiTimerSvcTimeMean OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "milliseconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"The mean time it took to resolve a timer query."
+	::= { gomiPerformanceEntry 9 }
+
+gomiTimerSvcTimeMax OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "milliseconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"The maximum time it took to resolve a timer query."
+	::= { gomiPerformanceEntry 10 }
+
+gomiMsgsSent OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of messages sent by this provider."
+	::= { gomiPerformanceEntry 11 }
+
+gomiLastMsgSent OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Last time a RFA message was sent.  In seconds since the epoch, January 1, 1970."
+	::= { gomiPerformanceEntry 12 }
+
+-- Client Management Table
+
+gomiClientTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF gomiClientEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding per client session information."
+	::= { gomiPlugin 5 }
+
+gomiClientEntry OBJECT-TYPE
+	SYNTAX     gomiClientEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per client session instance information."
+	INDEX    { gomiClientPluginId,
+	           gomiClientHandle }
+	::= { gomiClientTable 1 }
+
+gomiClientEntry ::= SEQUENCE {
+	gomiClientPluginId
+		PluginId,
+	gomiClientHandle
+		OCTET STRING,
+	gomiClientLoginName
+		OCTET STRING,
+	gomiClientIpAddress
+		OCTET STRING,
+	gomiClientRsslPort 
+		OCTET STRING,
+	gomiClientSessionName 
+		OCTET STRING,
+	gomiClientConnectionName 
+		OCTET STRING,
+	gomiClientPublisherName 
+		OCTET STRING
+	}
+
+gomiClientPluginId OBJECT-TYPE
+	SYNTAX     PluginId
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { gomiClientEntry 1 }
+
+gomiClientHandle OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Client session handle for this client."
+	::= { gomiClientEntry 2 }
+
+gomiClientLoginName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Client username, only set after MMT_LOGIN is received."
+	::= { gomiClientEntry 3 }
+
+gomiClientIpAddress OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Client source IP address."
+	::= { gomiClientEntry 4 }
+
+gomiClientRsslPort OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Listening RSSL IP port."
+	::= { gomiClientEntry 5 }
+
+gomiClientSessionName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA session name."
+	::= { gomiClientEntry 6 }
+
+gomiClientConnectionName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA connection name."
+	::= { gomiClientEntry 7 }
+
+gomiClientPublisherName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA publisher name."
+	::= { gomiClientEntry 8 }
+
+-- Session Performance Management Table
+
+gomiClientPerformanceTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF gomiClientPerformanceEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding per client session instance performance information."
+	::= { gomiPlugin 6 }
+
+gomiClientPerformanceEntry OBJECT-TYPE
+	SYNTAX     gomiClientPerformanceEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per client session instance performance information."
+	INDEX    { gomiClientPerformancePluginId,
+	           gomiClientPerformanceHandle }
+	::= { gomiClientPerformanceTable 1 }
+
+gomiClientPerformanceEntry ::= SEQUENCE {
+	gomiClientPerformancePluginId
+		PluginId,
+	gomiClientPerformanceHandle
+		OCTET STRING,
+	gomiClientLastActivity
+		Counter32,
+	gomiClientRfaMsgsSent
+		Counter32,
+	gomiRfaEventsReceived
+		Counter32,
+	gomiRfaEventsDiscarded
+		Counter32,
+	gomiOmmSolicitedItemEventsReceived
+		Counter32,
+	gomiOmmSolicitedItemEventsDiscarded
+		Counter32,
+	gomiRequestMsgsReceived
+		Counter32,
+	gomiRequestMsgsDiscarded
+		COunter32,
+	gomiMmtLoginReceived
+		Counter32,
+	gomiMmtLoginValidated
+		Counter32,
+	gomiMmtLoginMalformed
+		Counter32,
+	gomiMmtLoginRejected
+		Counter32,
+	gomiMmtLoginAccepted
+		Counter32,
+	gomiMmtLoginResponseValidated
+		Counter32,
+	gomiMmtLoginResponseMalformed
+		Counter32,
+	gomiMmtLoginException
+		Counter32,
+	gomiMmtDirectoryRequestReceived
+		Counter32,
+	gomiMmtDirectoryRequestValidated
+		Counter32,
+	gomiMmtDirectoryRequestMalformed
+		Counter32,
+	gomiMmtDirectoryValidated
+		Counter32,
+	gomiMmtDirectoryMalformed
+		Counter32,
+	gomiMmtDirectorySent
+		Counter32,
+	gomiMmtDirectoryException
+		Counter32,
+	gomiMmtDictionaryRequestReceived
+		Counter32,
+	gomiMmtDictionaryRequestValidated
+		Counter32,
+	gomiMmtDictionaryRequestMalformed
+		Counter32,
+	gomiItemRequestReceived
+		Counter32,
+	gomiItemReissueRequestReceived
+		Counter32,
+	gomiItemCloseRequestReceived
+		Counter32,
+	gomiItemRequestMalformed
+		Counter32,
+	gomiItemRequestBeforeLogin
+		Counter32,
+	gomiItemDuplicateSnapshot
+		Counter32,
+	gomiItemRequestDiscarded
+		Counter32,
+	gomiItemRequestRejected
+		Counter32,
+	gomiItemValidated
+		Counter32,
+	gomiItemMalformed
+		Counter32,
+	gomiItemNotFound
+		Counter32,
+	gomiItemSent
+		Counter32,
+	gomiItemClosed
+		Counter32,
+	gomiItemException
+		Counter32,
+	gomiOmmInactiveClientSessionReceived
+		Counter32,
+	gomiOmmInactiveClientSessionException
+		Counter32
+	}
+
+gomiClientPerformancePluginId OBJECT-TYPE
+	SYNTAX     PluginId
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { gomiClientPerformanceEntry 1 }
+
+gomiClientPerformanceHandle OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Unique instance identifier for this client session."
+	::= { gomiClientPerformanceEntry 2 }
+
+gomiClientLastActivity OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Last time activity was observed.  In seconds since the epoch, January 1, 1970."
+	::= { gomiClientPerformanceEntry 3 }
+
+gomiClientRfaMsgsSent OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of RFA messages sent to this client."
+	::= { gomiClientPerformanceEntry 4 }
+
+gomiRfaEventsReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of RFA events received for this client."
+	::= { gomiClientPerformanceEntry 5 }
+
+gomiRfaEventsDiscarded OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of RFA events discarded for this client."
+	::= { gomiClientPerformanceEntry 6 }
+
+gomiOmmSolicitedItemEventsReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of OMM Soliticed Item events received for this client."
+	::= { gomiClientPerformanceEntry 7 }
+
+gomiOmmSolicitedItemEventsDiscarded OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of OMM Soliticed Item events discarded for this client."
+	::= { gomiClientPerformanceEntry 8 }
+
+gomiRequestMsgsReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of Request messages received from this client."
+	::= { gomiClientPerformanceEntry 9 }
+
+gomiRequestMsgsDiscarded OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of Request messages discarded from this client."
+	::= { gomiClientPerformanceEntry 10 }
+
+gomiMmtLoginReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN requests received from this client."
+	::= { gomiClientPerformanceEntry 11 }
+
+gomiMmtLoginValidated OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN requests validated from this client."
+	::= { gomiClientPerformanceEntry 12 }
+
+gomiMmtLoginMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN requests malformed from this client."
+	::= { gomiClientPerformanceEntry 13 }
+
+gomiMmtLoginRejected OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN requests rejected from this client."
+	::= { gomiClientPerformanceEntry 14 }
+
+gomiMmtLoginAccepted OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN requests accepted from this client."
+	::= { gomiClientPerformanceEntry 15 }
+
+gomiMmtLoginResponseValidated OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN responses validated for this client."
+	::= { gomiClientPerformanceEntry 16 }
+
+gomiMmtLoginResponseMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN responses malformed for this client."
+	::= { gomiClientPerformanceEntry 17 }
+
+gomiMmtLoginException OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN exceptions caught for this client."
+	::= { gomiClientPerformanceEntry 18 }
+
+gomiMmtDirectoryRequestReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY requests received from this client."
+	::= { gomiClientPerformanceEntry 19 }
+
+gomiMmtDirectoryRequestValidated OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY requests validated from this client."
+	::= { gomiClientPerformanceEntry 20 }
+
+gomiMmtDirectoryRequestMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY requests malformed from this client."
+	::= { gomiClientPerformanceEntry 21 }
+
+gomiMmtDirectoryValidated OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY's validated for this client."
+	::= { gomiClientPerformanceEntry 22 }
+
+gomiMmtDirectoryMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY's malformed for this client."
+	::= { gomiClientPerformanceEntry 23 }
+
+gomiMmtDirectorySent OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY's sent to this client."
+	::= { gomiClientPerformanceEntry 24 }
+
+gomiMmtDirectoryException OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY exceptions caught for this client."
+	::= { gomiClientPerformanceEntry 25 }
+
+gomiMmtDictionaryRequestReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DICTIONARY requests received from this client."
+	::= { gomiClientPerformanceEntry 26 }
+
+gomiMmtDictionaryRequestValidated OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DICTIONARY requests validated from this client."
+	::= { gomiClientPerformanceEntry 27 }
+
+gomiMmtDictionaryRequestMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DICTIONARY requests malformed from this client."
+	::= { gomiClientPerformanceEntry 28 }
+
+gomiItemRequestReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item requests received from this client."
+	::= { gomiClientPerformanceEntry 29 }
+
+gomiItemReissueRequestReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item re-issue requests received from this client."
+	::= { gomiClientPerformanceEntry 30 }
+
+gomiItemCloseRequestReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item close requests received from this client."
+	::= { gomiClientPerformanceEntry 31 }
+
+gomiItemRequestMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item requests malformed from this client."
+	::= { gomiClientPerformanceEntry 32 }
+
+gomiItemRequestBeforeLogin OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item requests received illegally before login from this client."
+	::= { gomiClientPerformanceEntry 33 }
+
+gomiItemDuplicateSnapshot OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of duplicate item snapshot requests from this client.  Should always be zero."
+	::= { gomiClientPerformanceEntry 34 }
+
+gomiItemRequestDiscarded OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item requests discarded from this client."
+	::= { gomiClientPerformanceEntry 35 }
+
+gomiItemRequestRejected OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item requests rejected from this client."
+	::= { gomiClientPerformanceEntry 36 }
+
+gomiItemValidated OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of items validated for this client."
+	::= { gomiClientPerformanceEntry 37 }
+
+gomiItemMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of items malformed for this client."
+	::= { gomiClientPerformanceEntry 38 }
+
+gomiItemNotFound OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of unknown item requests from this client."
+	::= { gomiClientPerformanceEntry 39 }
+
+gomiItemSent OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of items sent to this client."
+	::= { gomiClientPerformanceEntry 40 }
+
+gomiItemClosed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of items closed to this client."
+	::= { gomiClientPerformanceEntry 41 }
+
+gomiItemException OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item exceptions caught for this client."
+	::= { gomiClientPerformanceEntry 42 }
+
+gomiOmmInactiveClientSessionReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of OMM inactive client sessions received from this client."
+	::= { gomiClientPerformanceEntry 43 }
+
+gomiOmmInactiveClientSessionException OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of OMM inactive client session exceptions caught for this client."
+	::= { gomiClientPerformanceEntry 44 }
+
+-- Outage Measurement Metrics Table
+
+gomiOutageMeasurementTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF gomiOutageMeasurementEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding outage measurement metrics for assigned clients."
+	::= { gomiPlugin 7 }
+
+gomiOutageMeasurementEntry OBJECT-TYPE
+	SYNTAX     gomiOutageMeasurementEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per client outage measurement metric information."
+	INDEX    { gomiOutageMeasurementPluginId,
+	           gomiOutageMeasurementClientName }
+	::= { gomiOutageMeasurementTable 1 }
+
+gomiOutageMeasurementEntry ::= SEQUENCE {
+	gomiOutageMeasurementPluginId
+		PluginId,
+	gomiOutageMeasurementClientName
+		OCTET STRING,
+	gomiAccumulatedOutageTime
+		Counter32,
+	gomiAccumulatedFailures
+		Counter32,
+	gomiRecordingStartTime
+		Counter32
+	}
+
+gomiOutageMeasurementPluginId OBJECT-TYPE
+	SYNTAX     PluginId
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { gomiOutageMeasurementEntry 1 }
+
+gomiOutageMeasurementClientName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Client username."
+	::= { gomiOutageMeasurementEntry 2 }
+
+gomiAccumulatedOutageTime OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Accumulated Outage Time (AOT) since measurement started."
+	::= { gomiOutageMeasurementEntry 3 }
+
+gomiAccumulatedFailures OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of Accumulated Failures (NAF) since measurement started."
+	::= { gomiOutageMeasurementEntry 4 }
+
+gomiRecordingStartTime OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Recording Start Time (RST) in seconds since the Unix epoch."
+	::= { gomiClientOutageOnLineEntry 5 }
+
+-- Outage Event Characterization Table
+
+gomiOutageEventTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF gomiOutageEventEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding reocrded state changes of monitored clients."
+	::= { gomiPlugin 8 }
+
+gomiOutageEventEntry OBJECT-TYPE
+	SYNTAX     gomiOutageEventEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per outage event information."
+	INDEX    { gomiOutageEventPluginId,
+		       gomiOutageEventId }
+	::= { gomiOutageEventTable 1 }
+
+gomiOutageEventEntry ::= SEQUENCE {
+	gomiOutageEventPluginId
+		PluginId,
+	gomiOutageEventId
+		Unsigned32,
+	gomiOutageClientName
+		OCTET STRING,
+	gomiOutageStartTime
+		Counter32,
+	gomiOutageEndTime
+		Counter32
+	gomiOutageState
+		INTEGER
+	}
+
+gomiOutageEventPluginId OBJECT-TYPE
+	SYNTAX     PluginId
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { gomiOutageEventEntry 1 }
+
+gomiOutageEventId OBJECT-TYPE
+	SYNTAX     Unsigned32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Unique identifier for this event."
+	::= { gomiOutageEventEntry 2 }
+
+gomiOutageClientName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Client username."
+	::= { gomiOutageEventEntry 3 }
+
+gomiOutageStartTime OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Time when the outage is first detected."
+	::= { gomiOutageEventEntry 4 }
+
+gomiOutageEndTime OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Time when the outage ends."
+	::= { gomiOutageEventEntry 5 }
+
+gomiOutageStatus OBJECT-TYPE
+	SYNTAX     INTEGER {
+			up (1),
+			down (2)
+		   }
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Status of service during recorded time period."
+	::= { gomiOutageEventEntry 6 }
+
+END
